@@ -1020,6 +1020,8 @@ body {
 }
 
 .ticker-row .tick-text {
+  /* Block, or overflow/ellipsis never apply and the text runs past the row. */
+  display: block;
   font:550 15.5px/1.4 var(--font);
   white-space: nowrap;
   overflow: hidden;

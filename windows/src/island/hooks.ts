@@ -38,6 +38,17 @@ interface HookPayload {
   prompt?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** Notification: "permission_prompt", "idle_prompt", "elicitation_dialog"… */
+  notification_type?: string;
+  /** StopFailure: what went wrong ("rate_limit", "server_error"…) and how. */
+  error?: string;
+  error_details?: string;
+  /** Added by coucou-hook to a finished test run: its verdict and a short count. */
+  test_outcome?: "pass" | "fail";
+  test_summary?: string;
+  /** SubagentStart / SubagentStop. */
+  agent_id?: string;
+  agent_type?: string;
 }
 
 const PROJECT_ALIASES: Record<string, string> = {
@@ -150,6 +161,36 @@ function saveCompletedHandoff(payload: HookPayload, cwd: string, response: strin
   }).catch((error) => console.error("[coucou] could not save project handoff", error));
 }
 
+/** "rate_limit" + details → one readable line for the error card. */
+const STOP_FAILURES: Record<string, string> = {
+  rate_limit: "Usage limit reached.",
+  authentication_failed: "Claude Code couldn't sign in.",
+  billing_error: "There's a billing problem with the account.",
+  invalid_request: "Claude Code sent a request the API refused.",
+  server_error: "Anthropic's servers had a problem.",
+  max_output_tokens: "The reply hit its length limit.",
+};
+
+function stopFailureDetail(payload: HookPayload): string {
+  const kind = payload.error ?? "";
+  const known = STOP_FAILURES[kind] ?? (kind ? kind.replace(/_/g, " ") : "");
+  const extra = (payload.error_details ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const line = [known, extra].filter(Boolean).join(" — ");
+  return `⚠ ${line || "Claude Code stopped on an API error."}`;
+}
+
+/** AskUserQuestion carries its questions in `questions[].question`. */
+function firstQuestion(input: Record<string, unknown>): string | null {
+  const list = input.questions;
+  if (Array.isArray(list)) {
+    for (const q of list) {
+      const text = q && typeof q === "object" ? (q as Record<string, unknown>).question : null;
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
+  }
+  return typeof input.question === "string" ? input.question : null;
+}
+
 export function registerHookHandlers(island: Island) {
   void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
 }
@@ -180,6 +221,15 @@ function handleHook(island: Island, payload: HookPayload) {
     } else if (State.mode === "hidden") {
       island.reveal();
     }
+  };
+
+  /** Claude is waiting on you: the question card, or a badge-free reveal if another pill has the view. */
+  const askQuestion = (text: string) => {
+    State.updateTask(CLAUDE_ID, "question");
+    State.appendStep(CLAUDE_ID, text.replace(/\s+/g, " ").slice(0, 160));
+    Sound.play("question");
+    if (focused) surface("question", true);
+    else island.reveal();
   };
 
   switch (name) {
@@ -215,8 +265,12 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "PreToolUse": {
       upsert(projectName, cwd, payload.agent_source === "codex" ? "codex" : "claudeCode");
-      State.updateTask(CLAUDE_ID, "working");
       const tool = payload.tool_name ?? "Tool";
+      if (tool === "AskUserQuestion") {
+        askQuestion(firstQuestion(payload.tool_input ?? {}) ?? "Claude has a question for you.");
+        break;
+      }
+      State.updateTask(CLAUDE_ID, "working");
       State.appendStep(CLAUDE_ID, stepLabel(tool, payload.tool_input ?? {}));
       island.toolActivity();
       surface("overview", false);
@@ -235,12 +289,15 @@ function handleHook(island: Island, payload: HookPayload) {
     case "Notification": {
       const message = payload.message ?? "";
       const lower = message.toLowerCase();
-      if (lower.includes("rate limit") || lower.includes("limite d")) {
+      const kind = payload.notification_type ?? "";
+      if (lower.includes("rate limit") || lower.includes("usage limit") || lower.includes("limite d")) {
         State.updateTask(CLAUDE_ID, "ratelimit");
         Sound.play("rate");
-      } else if (message.endsWith("?")) {
-        State.updateTask(CLAUDE_ID, "question");
-        State.appendStep(CLAUDE_ID, message);
+      } else if (kind === "elicitation_dialog" || (kind === "" && message.trim().endsWith("?"))) {
+        // A real question for you. Claude Code's own notifications ("Claude is
+        // waiting for your input") never end in "?", so the type decides, and
+        // the old "?" check only remains for builds that send no type.
+        askQuestion(message || "Claude needs an answer.");
       }
       break;
     }
@@ -292,12 +349,17 @@ function handleHook(island: Island, payload: HookPayload) {
       surface("overview", false);
       break;
 
-    case "StopFailure":
+    case "StopFailure": {
+      // Say what actually failed. Without this the card showed the last step —
+      // often the previous turn's cheerful "All done" — as the error.
+      const detail = stopFailureDetail(payload);
+      State.appendStep(CLAUDE_ID, detail);
       State.updateTask(CLAUDE_ID, "error");
       Sound.play("error");
       if (focused) surface("error", true);
       else State.setPillBadge(CLAUDE_ID, "error");
       break;
+    }
 
     case "SessionEnd":
       State.updateTask(CLAUDE_ID, "idle");

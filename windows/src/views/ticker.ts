@@ -39,7 +39,9 @@ function makeRow(): Row {
   const dim = h("span", {
     class: "tick-text",
     dir: "auto",
-    style: "position:absolute;left:0;right:0;color:#a2a8b4",
+    // `top:0` matters: without it the layer keeps its static position, which is
+    // *after* the shimmer text, and a long step wraps it onto the next row.
+    style: "position:absolute;left:0;right:0;top:0;color:#a2a8b4",
   });
   const el = h(
     "div",

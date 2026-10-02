@@ -20,6 +20,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// Budget for getting a pipe connection. Beyond this Claude Code wins, always.
+#[cfg(windows)]
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 /// Whole-run budget for an event nobody waits on: connect and write, no more.
 const FIRE_AND_FORGET_BUDGET: Duration = Duration::from_secs(2);
@@ -28,6 +29,7 @@ const DECISION_BUDGET: Duration = Duration::from_secs(110);
 
 /// `ERROR_PIPE_BUSY` — every instance is serving someone else right now. This is
 /// the one error worth retrying: the server exists and a slot will free up.
+#[cfg(windows)]
 const ERROR_PIPE_BUSY: i32 = 231;
 
 /// Fields that are pointless to forward and can be enormous (a whole file read,
@@ -37,11 +39,14 @@ const DROPPED_FIELDS: &[&str] = &["tool_response", "transcript_path"];
 /// less than this anyway.
 const MAX_FIELD_LEN: usize = 2_000;
 
+mod testrun;
+#[cfg(windows)]
 mod win;
 
 /// `\\.\pipe\coucou-<sid>`. The SID keeps two accounts on the same machine from
 /// ever meeting on the same pipe; the name falls back to the user name only if
 /// the SID cannot be read at all, which should not happen.
+#[cfg(windows)]
 fn pipe_path() -> String {
     let key = win::current_user_sid()
         .unwrap_or_else(|| std::env::var("USERNAME").unwrap_or_else(|_| "user".into()));
@@ -50,6 +55,7 @@ fn pipe_path() -> String {
 
 /// Opens the pipe. Retries only while the server is busy: any other error means
 /// there is nothing to talk to, and waiting would only delay Claude Code.
+#[cfg(windows)]
 fn connect() -> Option<std::fs::File> {
     use std::os::windows::io::AsRawHandle;
     let path = pipe_path();
@@ -69,6 +75,13 @@ fn connect() -> Option<std::fs::File> {
             }
         }
     }
+}
+
+/// Coucou only exists on Windows; elsewhere (tests, CI on Linux) there is never
+/// anything to talk to, which is exactly the "app closed" path.
+#[cfg(not(windows))]
+fn connect() -> Option<std::fs::File> {
+    None
 }
 
 fn main() {
@@ -180,6 +193,23 @@ fn read_event() -> Option<(String, String)> {
         }
     }
 
+    // A test run keeps its verdict ("pass"/"fail" and a short count) — the only
+    // thing the island needs from `tool_response`, which is dropped right below.
+    if event == "PostToolUse" || event == "PostToolUseFailure" {
+        let verdict = testrun::verdict(
+            &event,
+            map.get("tool_input"),
+            map.get("tool_response"),
+            map.get("error").and_then(|v| v.as_str()),
+        );
+        if let Some((verdict, summary)) = verdict {
+            map.insert("test_outcome".into(), serde_json::Value::String(verdict.as_str().into()));
+            if let Some(summary) = summary {
+                map.insert("test_summary".into(), serde_json::Value::String(summary));
+            }
+        }
+    }
+
     for field in DROPPED_FIELDS {
         map.remove(*field);
     }
@@ -278,23 +308,30 @@ mod tests {
     #[test]
     fn decision_json_matches_the_documented_shape() {
         assert_eq!(
-            decision_json("allow").unwrap(),
+            decision_json("allow", false).unwrap(),
             r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}"#
         );
         assert_eq!(
-            decision_json("deny").unwrap(),
+            decision_json("deny", false).unwrap(),
             r#"{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Coucou"}}}"#
         );
         // "always" is an island concept; Claude Code just gets an allow.
-        assert!(decision_json("always").unwrap().contains(r#""behavior":"allow""#));
+        assert!(decision_json("always", false).unwrap().contains(r#""behavior":"allow""#));
+    }
+
+    #[test]
+    fn codex_gets_the_same_decisions() {
+        assert_eq!(decision_json("allow", true), decision_json("allow", false));
+        assert_eq!(decision_json("deny", true), decision_json("deny", false));
+        assert!(decision_json("maybe", true).is_none());
     }
 
     #[test]
     fn anything_unrecognised_prints_nothing() {
-        assert!(decision_json("").is_none());
-        assert!(decision_json("maybe").is_none());
+        assert!(decision_json("", false).is_none());
+        assert!(decision_json("maybe", false).is_none());
         // The shape the app used to send must not be mistaken for a decision.
-        assert!(decision_json(r#"{"permissionDecision":"allow"}"#).is_none());
+        assert!(decision_json(r#"{"permissionDecision":"allow"}"#, false).is_none());
     }
 
     #[test]

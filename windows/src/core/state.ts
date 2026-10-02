@@ -138,6 +138,9 @@ class AppState {
   chatHistory: ChatMessage[] = [];
   suggestedPrompt: string | null = null;
   pendingApproval: ApprovalInfo | null = null;
+  /** What the music host is doing — drives the header ♪ button. */
+  music = { playing: false, station: "bounce", ducked: false };
+
   /** Last local project directory reported by a Claude/Codex session in VS Code. */
   activeProjectCwd: string | null = null;
 

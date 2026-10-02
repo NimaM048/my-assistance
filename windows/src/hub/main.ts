@@ -1,8 +1,15 @@
 import "./hub.css";
+import "./focus.css";
+import "./radio.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
 import { mochiPortrait } from "../mochi/portrait";
+import { focusKeydown, refreshFocusPage, renderFocusPage, setFocusHost, tickFocus, type FocusHost } from "./focus";
+import type { FocusData, FocusTask } from "./types";
+import { nowPlayingCard, renderRadioPage } from "./radio";
+import { music } from "../music/remote";
+import { STATIONS } from "../music/stations";
 
 type Page = "repositories" | "queue" | "music" | "focus" | "activity";
 type Filter = "all" | "public" | "private" | "pinned";
@@ -10,10 +17,6 @@ type QueueFilter = "all" | "github" | "reviews" | "local";
 type Mood = "focus" | "energy" | "chill";
 interface MusicQuery { query: string; taste: string; mood: Mood; at: number }
 interface MusicPrefs { tastes: string[]; weights: Record<string, number>; mood: Mood; recent: MusicQuery[] }
-type FocusMode = "focus" | "short" | "long";
-interface FocusTask { id: string; title: string; repo: string; createdAt: number; doneAt: number | null; kind?: "task" | "note"; note?: string; scheduledFor?: string | null }
-interface FocusSession { at: number; minutes: number }
-interface FocusData { tasks: FocusTask[]; mode: FocusMode; focusMinutes: number; remaining: number; running: boolean; endAt: number | null; sessions: FocusSession[] }
 type ActivityKind = "focus" | "task" | "project";
 interface ActivityItem { id: string; kind: ActivityKind; title: string; repo: string; detail: string; at: number; minutes?: number }
 type NoticeKind = "approval" | "complete" | "error" | "focus" | "reminder";
@@ -69,6 +72,39 @@ const FA_COPY: Record<string, string> = {
   "Open on GitHub": "در GitHub باز شد", "Opened in VS Code": "در VS Code باز شد", "today": "امروز", "yesterday": "دیروز", "recently": "به‌تازگی", "Clean": "بدون تغییر", "No commits": "بدون Commit", "Local clone found": "نسخهٔ محلی پیدا شد", "Reading local Git status…": "در حال خواندن وضعیت محلی Git…", "Detached HEAD": "شاخهٔ جداشده",
   "Attach to a repository": "اتصال به یک پروژه", "Complete task": "انجام کار", "Mark as not done": "برگرداندن به انجام‌نشده", "Reset timer": "بازنشانی زمان‌سنج", "Switch language": "تغییر زبان", "minutes done. Take a breath or start a short break.": "دقیقه تمرکز کردی. کمی استراحت کن یا وقفهٔ کوتاهی شروع کن.", "Ready for another focus session?": "برای یک جلسهٔ تمرکز دیگر آماده‌ای؟",
   "Tasks": "تسک‌ها", "Notes": "یادداشت‌ها", "Add task": "افزودن تسک", "Add note": "یادداشت جدید", "Remove note": "حذف یادداشت", "No tasks yet": "هنوز تسکی اضافه نشده", "Nothing to note yet": "هنوز یادداشتی ثبت نشده", "Keep ideas and project details here for later.": "ایده‌ها و جزئیات پروژه را برای بعد اینجا نگه دار.",
+  // Focus & tasks (src/hub/focus.ts)
+  "Good morning": "صبح بخیر", "Good afternoon": "عصر بخیر", "Good evening": "شب بخیر", "Working late": "تا دیروقت بیداری",
+  "Everything's done. Mochi is proud of you!": "همه‌چیز انجام شد. موچی بهت افتخار می‌کنه!",
+  "Focus goal reached — take a real break.": "به هدف تمرکزت رسیدی — یه استراحت حسابی بکن.",
+  "Plan one small win to get started.": "برای شروع، یک برد کوچک برنامه‌ریزی کن.",
+  "Nice momentum — keep it gentle.": "ریتم خوبی داری — آروم ادامه بده.",
+  "One step at a time — you've got this.": "قدم‌به‌قدم — از پسش برمیای.",
+  "Tasks done": "تسک‌های انجام‌شده", "Lower the daily goal": "کم کردن هدف روزانه", "Raise the daily goal": "بیشتر کردن هدف روزانه",
+  "min": "دقیقه", "day streak": "روز پیاپی", "Days in a row with focus time or a finished task": "روزهای پشت‌سرهم با تمرکز یا تسک انجام‌شده",
+  "Daily goal": "هدف روزانه", "Focus minutes for the last seven days": "دقیقه‌های تمرکز در هفت روز گذشته", "sessions": "جلسه",
+  "Upcoming": "پیش رو", "Done": "انجام‌شده", "Priority": "اولویت",
+  "Enter to add · the pin sets priority": "Enter برای افزودن · سنجاق برای اولویت",
+  "new task": "تسک جدید", "start / pause": "شروع / توقف",
+  "Jot down an idea…": "یه ایده یادداشت کن…", "Plan something for later…": "برای بعد برنامه بریز…",
+  "Nothing finished yet": "هنوز تسکی تمام نشده", "Ticked-off tasks from the last two weeks show up here.": "تسک‌هایی که در دو هفتهٔ اخیر تیک زدی اینجا می‌آیند.",
+  "Nothing planned ahead": "برای بعد برنامه‌ای نیست", "Give a task a later date and it waits here.": "به یک تسک تاریخ بعدی بده تا اینجا منتظرت بمونه.",
+  "Nothing planned yet": "هنوز برنامه‌ای نداری", "Add one small task to get going.": "برای شروع، یک تسک کوچک اضافه کن.",
+  "Completed today": "انجام‌شده امروز", "All done for today!": "تسک‌های امروز تمام شد!", "tasks finished. Enjoy the rest of your day.": "تسک تمام شد. از بقیهٔ روزت لذت ببر.",
+  "Double-click to edit": "برای ویرایش دوبار کلیک کن", "Task title": "عنوان تسک", "Drag to reorder": "برای جابه‌جایی بکش",
+  "Focus time on this task": "زمان تمرکز روی این تسک", "Focus on this": "روی این تمرکز کن", "Change priority": "تغییر اولویت",
+  "No priority": "بدون اولویت", "Low priority": "اولویت کم", "Medium priority": "اولویت متوسط", "High priority": "اولویت بالا",
+  "Low": "کم", "Medium": "متوسط", "High": "بالا",
+  "Mochi": "موچی", "Mochi, focusing with you": "موچی، همراه تمرکز تو",
+  "Deep focus": "تمرکز عمیق", "Focusing": "در حال تمرکز", "On a break": "در استراحت", "Paused": "متوقف", "Ready": "آماده",
+  "Start break": "شروع استراحت", "Focusing on": "تمرکز روی", "Nothing in particular": "چیز خاصی نه",
+  "Add 5 minutes": "۵ دقیقه بیشتر", "session today": "جلسه امروز", "sessions today": "جلسه امروز",
+  "Play": "پخش", "Stop": "توقف", "Station": "ایستگاه", "Auto": "خودکار", "Start music with every focus session": "پخش موسیقی با هر جلسهٔ تمرکز",
+  "Focusing on it — you've got this": "روش تمرکز کن — از پسش برمیای",
+  "Focus session complete": "جلسهٔ تمرکز تمام شد", "Break complete": "استراحت تمام شد",
+  // Mochi Radio (src/hub/radio.ts)
+  "Playing while your agent works": "در حال پخش، تا ایجنتت کار می‌کند", "Playing for your focus session": "در حال پخش برای جلسهٔ تمرکزت", "Your pick": "انتخاب خودت", "Another station": "یک ایستگاه دیگر", "Volume": "صدا", "MOCHI RADIO": "رادیو موچی", "Composed live on your PC — no streaming, works offline.": "همین حالا روی کامپیوترت ساخته می‌شود — بدون استریم، حتی آفلاین.", "STATIONS": "ایستگاه‌ها", "Pick a vibe": "یک حال‌وهوا انتخاب کن", "DISCOVER": "کشف کن", "More music on YouTube Music": "موسیقی بیشتر در YouTube Music", "🎲  Surprise me": "🎲  غافلگیرم کن", "WHEN MOCHI PLAYS": "موچی کی می‌نوازد", "Music that follows your day": "موسیقی‌ای که همراه روزت است", "While your agent works": "وقتی ایجنتت کار می‌کند", "Claude Code or Codex busy? Mochi puts its headphones on and plays something cute. It turns down for questions.": "Claude Code یا Codex مشغول است؟ موچی هدفونش را می‌گذارد و یک آهنگ بامزه پخش می‌کند. موقع سؤال‌ها صدا را کم می‌کند.", "During focus sessions": "در جلسه‌های تمرکز", "Starts with your pomodoro and stops for breaks.": "با پومودورو شروع می‌شود و موقع استراحت قطع می‌شود.", "Victory jingles": "آهنگ پیروزی", "A tiny fanfare when a session finishes — and a sad trombone when it fails.": "یک جشن کوچک وقتی جلسه تمام می‌شود — و یک ترومبون غمگین وقتی شکست می‌خورد.", "Stop the music": "قطع موسیقی", "Open Mochi Radio": "باز کردن رادیو موچی", "Agent at work": "ایجنت در حال کار", "Focus session": "جلسهٔ تمرکز", "Mochi Radio": "رادیو موچی", "Mochi, DJ": "موچی، دی‌جی", "Mochi's own radio, composed live — plus new music to discover.": "رادیوی خود موچی که زنده ساخته می‌شود — به‌علاوهٔ موسیقی تازه برای کشف.", "Bouncy beats for busy agents": "ضرب‌های شاد برای ایجنت‌های پرکار", "Warm keys, dusty drums, deep focus": "پیانوی گرم، درام قدیمی، تمرکز عمیق", "Happy 8-bit adventures": "ماجراهای شاد ۸ بیتی", "Gentle bells for calm work": "زنگوله‌های آرام برای کار بی‌دغدغه", "Soft rain and slow piano": "باران نرم و پیانوی آرام",
+  "Play Mochi Radio": "پخش رادیو موچی", "A random station, composed live · Ctrl Shift M": "یک ایستگاه تصادفی، زنده ساخته‌شده · Ctrl Shift M",
+  "Mochi takes the headphones off · Ctrl Shift M": "موچی هدفونش را برمی‌دارد · Ctrl Shift M",
 };
 Object.assign(FA_COPY, {
   "Due date": "تاریخ انجام",
@@ -153,7 +189,6 @@ let pinned = readPins();
 let prefs = readPrefs();
 let toastTimer = 0;
 let focus = readFocus();
-let focusTick = 0;
 let activities = readActivities();
 let notifications = readNotifications();
 let notificationsMuted = readNotificationPrefs();
@@ -194,6 +229,14 @@ function translateText(value: string): string {
   return value === source ? translated : value.replace(source, translated);
 }
 function localizeTree(node: Node) {
+  // A text node handed in directly (e.g. after `el.textContent = …`) is the
+  // walker's root, which nextNode() never visits — translate it here.
+  if (node instanceof Text) {
+    const original = node.textContent ?? "";
+    const translated = translateText(original);
+    if (translated !== original) node.textContent = translated;
+    return;
+  }
   const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
   const textNodes: Text[] = [];
   while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
@@ -231,7 +274,7 @@ function readFocus(): FocusData {
       // Older tasks were implicitly part of the day they were created.
       scheduledFor: task.scheduledFor === undefined && task.kind !== "note" ? dayKey(task.createdAt) : task.scheduledFor ?? null,
     })) : [];
-    return { tasks, mode: saved?.mode ?? "focus", focusMinutes: saved?.focusMinutes ?? 25, remaining: saved?.remaining ?? 1500, running: saved?.running ?? false, endAt: saved?.endAt ?? null, sessions: Array.isArray(saved?.sessions) ? saved.sessions : [] };
+    return { tasks, mode: saved?.mode ?? "focus", focusMinutes: saved?.focusMinutes ?? 25, remaining: saved?.remaining ?? 1500, running: saved?.running ?? false, endAt: saved?.endAt ?? null, sessions: Array.isArray(saved?.sessions) ? saved.sessions : [], goalMinutes: typeof saved?.goalMinutes === "number" ? saved.goalMinutes : 120, activeTaskId: saved?.activeTaskId ?? null };
   } catch { return { tasks: [], mode: "focus", focusMinutes: 25, remaining: 1500, running: false, endAt: null, sessions: [] }; }
 }
 function saveFocus() { localStorage.setItem(STORE_FOCUS, JSON.stringify(focus)); }
@@ -279,7 +322,7 @@ function saveItemSchedule(item: FocusTask, dateInput: HTMLInputElement, label: H
   label.textContent = planDateLabel(item.scheduledFor, item.kind === "note" ? "note" : "task");
   saveFocus();
   processPlanReminders();
-  if (page === "focus") renderFocus();
+  if (page === "focus") refreshFocusPage();
 }
 function planDatePicker(item: FocusTask, kind: "task" | "note", className = "plan-date-control"): HTMLElement {
   const label = h("label", { class: className, title: kind === "note" ? "Reminder date" : "Due date" });
@@ -300,7 +343,7 @@ async function enablePlanReminders() {
   saveReminderPrefs();
   toast("Daily reminders enabled");
   processPlanReminders();
-  if (page === "focus") renderFocus();
+  if (page === "focus") refreshFocusPage();
 }
 function addPlanReminder(id: string, title: string, detail: string) {
   const at = Date.now();
@@ -508,7 +551,7 @@ const accountName = h("b", { text: "GitHub" });
 const accountNote = h("small", { text: "Connected account" });
 const title = h("h1", { text: "Projects" });
 const subtitle = h("div", { class: "subtitle", text: "See local Git activity and open your GitHub projects." });
-const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") openMusicSearch(randomQuery()); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
+const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") surpriseStation(); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
 const commandButton = h("button", { class: "command-shortcut", title: "Search Coucou Hub", onclick: openCommandPalette }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl K" }));
 const projectSearchButton = h("button", { class: "command-shortcut project-search-shortcut", title: "Search local project files", onclick: openProjectSearch }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl Shift F" }));
 const languageButton = h("button", { class: "language-switch", title: "Switch language", "aria-label": "Switch language", text: hubLanguage === "en" ? "فارسی" : "English", onclick: toggleHubLanguage });
@@ -518,6 +561,7 @@ const mainContent = h("div", { class: "page-content" });
 const rootEl = h("div", { class: "hub" },
   h("aside", { class: "sidebar" }, logo,
     h("div", { class: "nav-label", text: "Workspace" }), repoNav, queueNav, focusNav, activityNav, musicNav,
+    nowPlayingCard(() => setPage("music")),
     h("div", { class: "sidebar-spacer" }),
     h("div", { class: "free-note" }, h("b", { text: "Free by design" }), "Local preferences and GitHub's free API. No paid add-on."),
     h("div", { class: "account" }, accountAvatar, h("div", { class: "account-copy" }, accountName, accountNote)),
@@ -576,7 +620,7 @@ function setPage(next: Page) {
   subtitle.textContent = next === "repositories"
     ? "See local Git activity and open your GitHub projects."
     : next === "queue" ? "Your next actions, gathered in one place."
-      : next === "music" ? "A little music discovery, tuned to your taste."
+      : next === "music" ? "Mochi's own radio, composed live — plus new music to discover."
       : next === "activity" ? "A private, local timeline of your work."
         : "Plan today's work and protect a little time to focus.";
   renderPage();
@@ -835,6 +879,17 @@ function rateTaste(taste: string, amount: number) {
 
 function renderMusic() {
   clear(mainContent);
+  renderRadioPage(mainContent, buildDiscovery());
+}
+
+/** "Surprise me": a different station than the one playing. */
+function surpriseStation() {
+  const others = STATIONS.filter((s) => !music.state.playing || s.id !== music.state.station);
+  music.play(others[Math.floor(Math.random() * others.length)].id, "manual");
+}
+
+/** The YouTube Music discovery panels, shown under Mochi Radio. */
+function buildDiscovery(): HTMLElement {
   const tasteInput = h("input", { class: "taste-input", placeholder: "Add a sound you like…", maxlength: "40" }) as HTMLInputElement;
   const searchInput = h("input", { placeholder: "e.g. Persian rap remix for night drive", onkeydown: (event: Event) => { if ((event as KeyboardEvent).key === "Enter") openMusicSearch(searchInput.value); } }) as HTMLInputElement;
   const tasteList = h("div", { class: "taste-list" });
@@ -866,41 +921,14 @@ function renderMusic() {
   const mood = h("section", { class: "music-panel" }, h("h3", { text: "Pick a mood" }), moodGrid, h("button", { class: "toolbar-button primary", style: "width:100%;justify-content:center", onclick: () => openMusicSearch(randomQuery()) }, svg(ICONS.shuffle, 13), "Surprise me"));
   const recentPanel = h("section", { class: "music-panel" }, h("h3", { text: "Recent discoveries" }), recent);
   const note = h("div", { class: "music-free-note" }, "Free tier: YouTube Music plays with ads. Coucou opens a search; choose a result and press play. Music background play may require YouTube Music Premium.");
-  mainContent.append(h("div", { class: "music-layout" }, hero, customSearch, tastes, mood, recentPanel, note));
+  return h("div", { class: "music-layout" }, hero, customSearch, tastes, mood, recentPanel, note);
 }
 
-function focusMinutesFor(mode: FocusMode): number {
-  return mode === "focus" ? focus.focusMinutes : mode === "short" ? 5 : 15;
-}
-function beginFocusMode(mode: FocusMode) {
-  focus.mode = mode;
-  focus.running = false;
-  focus.endAt = null;
-  focus.remaining = focusMinutesFor(mode) * 60;
-  saveFocus();
-  renderFocus();
-}
 function fmtClock(seconds: number): string {
   const safe = Math.max(0, seconds);
   const clock = `${Math.floor(safe / 60).toString().padStart(2, "0")}:${Math.floor(safe % 60).toString().padStart(2, "0")}`;
   return hubLanguage === "fa" ? clock.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]) : clock;
 }
-function finishFocusSession() {
-  if (!focus.running || !focus.endAt || focus.endAt > Date.now()) return;
-  const finished = focus.mode;
-  if (finished === "focus") focus.sessions.push({ at: Date.now(), minutes: focus.focusMinutes });
-  focus.mode = finished === "focus" ? "short" : "focus";
-  focus.running = false;
-  focus.endAt = null;
-  focus.remaining = focusMinutesFor(focus.mode) * 60;
-  focus.sessions = focus.sessions.filter((session) => Date.now() - session.at < 35 * 86_400_000);
-  saveFocus();
-  addFocusNotification(finished === "focus" ? "Focus session complete" : "Break complete", finished === "focus" ? `${focus.focusMinutes} minutes done. Take a breath or start a short break.` : "Ready for another focus session?");
-  window.clearInterval(focusTick);
-  focusTick = 0;
-  if (page === "focus") renderFocus();
-}
-
 function renderActivity() {
   clear(mainContent);
   const selected = new Date(`${activityDay}T00:00:00`);
@@ -975,7 +1003,7 @@ function openQuickCapture(initialKind: "task" | "note" = "task") {
     saveCapturedItem(title, repoPicker.value, kind, noteInput.value, scheduleInput.value || null);
     close();
     toast(kind === "task" ? "Task saved to Focus" : "Note saved to Focus");
-    if (page === "focus") renderFocus();
+    if (page === "focus") refreshFocusPage();
   };
   function chooseKind(next: "task" | "note") {
     kind = next;
@@ -1009,188 +1037,53 @@ function openQuickCapture(initialKind: "task" | "note" = "task") {
   titleInput.focus();
 }
 
-function renderFocus() {
-  window.clearInterval(focusTick);
-  clear(mainContent);
-  const openTasks = focus.tasks.filter((task) => task.kind !== "note" && !task.doneAt);
-  const notes = focus.tasks.filter((task) => task.kind === "note")
-    .sort((a, b) => (a.scheduledFor ?? "9999-12-31").localeCompare(b.scheduledFor ?? "9999-12-31") || b.createdAt - a.createdAt);
-  const completedToday = focus.tasks.filter((task) => task.kind !== "note" && task.doneAt && new Date(task.doneAt).toDateString() === new Date().toDateString());
-  const sessionsToday = focus.sessions.filter((session) => new Date(session.at).toDateString() === new Date().toDateString());
-  const focusedMinutes = sessionsToday.reduce((sum, session) => sum + session.minutes, 0);
-  const stats = h("div", { class: "stats focus-stats" },
-    h("div", { class: "stat-card" }, h("div", { class: "stat-label", text: "Still to do" }), h("div", { class: "stat-value", text: formatNumber(openTasks.length) })),
-    h("div", { class: "stat-card" }, h("div", { class: "stat-label", text: "Done today" }), h("div", { class: "stat-value", text: formatNumber(completedToday.length) })),
-    h("div", { class: "stat-card" }, h("div", { class: "stat-label", text: "Focus today" }), h("div", { class: "stat-value" }, formatNumber(focusedMinutes), h("small", { text: "minutes" }))),
-  );
-
-  const taskList = h("div", { class: "focus-task-list task-items" });
-  const noteList = h("div", { class: "focus-task-list note-items" });
-  function drawTasks() {
-    clear(taskList);
-    const list = focus.tasks.filter((task) => task.kind !== "note" && (!task.doneAt || new Date(task.doneAt).toDateString() === new Date().toDateString()))
-      .sort((a, b) => Number(Boolean(a.doneAt)) - Number(Boolean(b.doneAt)) || (a.scheduledFor ?? "9999-12-31").localeCompare(b.scheduledFor ?? "9999-12-31"));
-    if (!list.length) {
-      taskList.append(h("div", { class: "focus-empty task-empty" }, mochiPortrait({ size: 64, follow: true, idleMoods: ["whistle", "lookAround", "hop", "curious"], clickMoods: ["giggle", "excited"] }), h("b", { text: "No tasks yet" }), h("span", { text: "Add a task and make the next step easy." })));
-      return;
-    }
-    for (const task of list) {
-      const done = Boolean(task.doneAt);
-      const repo = task.repo ? catalog?.repositories.find((item) => item.fullName === task.repo) : null;
-      const row = h("div", { class: `focus-task ${done ? "done" : ""} ${!done && task.scheduledFor && task.scheduledFor < todayKey() ? "overdue" : ""}` });
-      row.append(h("button", { class: `task-check ${done ? "checked" : ""}`, title: done ? "Mark as not done" : "Complete task", onclick: (event: Event) => {
-        if (!done) popConfetti(event.currentTarget as HTMLElement);
-        task.doneAt = done ? null : Date.now();
-        saveFocus();
-        renderFocus();
-      } }, done ? "✓" : ""));
-      const taskMeta = h("div", { class: "plan-item-meta" }, task.repo ? h("small", { class: "task-project", text: repo?.name ?? task.repo }) : null, planDatePicker(task, "task"));
-      row.append(h("div", { class: "task-copy" }, h("b", { text: task.title }), task.note ? h("small", { class: "task-detail", text: task.note }) : null, taskMeta));
-      row.append(h("button", { class: "task-delete", title: "Remove task", text: "×", onclick: () => {
-        focus.tasks = focus.tasks.filter((item) => item.id !== task.id);
-        saveFocus();
-        renderFocus();
-      } }));
-      taskList.append(row);
-    }
-  }
-  function drawNotes() {
-    clear(noteList);
-    if (!notes.length) {
-      noteList.append(h("div", { class: "focus-empty note-empty" }, h("span", { class: "note-empty-mark" }, svg(ICONS.doc, 16)), h("b", { text: "Nothing to note yet" }), h("span", { text: "Keep ideas and project details here for later." })));
-      return;
-    }
-    for (const note of notes) {
-      const repo = note.repo ? catalog?.repositories.find((item) => item.fullName === note.repo) : null;
-      const noteMeta = h("div", { class: "plan-item-meta" }, note.repo ? h("small", { class: "task-project", text: repo?.name ?? note.repo }) : null, planDatePicker(note, "note"));
-      const card = h("article", { class: "focus-note-card" },
-        h("span", { class: "note-mark", title: "Note" }, svg(ICONS.doc, 14)),
-        h("div", { class: "task-copy note-copy" }, h("b", { text: note.title }), note.note ? h("small", { class: "task-detail", text: note.note }) : null, noteMeta),
-        h("button", { class: "task-delete", title: "Remove note", text: "×", onclick: () => {
-          focus.tasks = focus.tasks.filter((item) => item.id !== note.id);
-          saveFocus();
-          renderFocus();
-        } }),
-      );
-      noteList.append(card);
-    }
-  }
-  drawTasks();
-  drawNotes();
-
-  const taskInput = h("input", { id: "focus-task-input", placeholder: "What needs your attention?", maxlength: "120" }) as HTMLInputElement;
-  const taskDateInput = h("input", { class: "task-compose-date", type: "date", value: todayKey(), title: "Due date", "aria-label": "Due date" }) as HTMLInputElement;
-  const repoOptions: HTMLOptionElement[] = [h("option", { value: "", text: "General" })];
-  for (const repo of catalog?.repositories ?? []) repoOptions.push(h("option", { value: repo.fullName, text: repo.fullName }));
-  const repoPicker = h("select", { class: "focus-repo-select", title: "Attach to a repository" }, ...repoOptions) as HTMLSelectElement;
-  const addTask = () => {
-    const value = taskInput.value.trim().replace(/\s+/g, " ");
-    if (!value) { taskInput.focus(); return; }
-    saveCapturedItem(value, repoPicker.value, "task", "", taskDateInput.value || null);
-    taskInput.value = "";
-    renderFocus();
-    document.getElementById("focus-task-input")?.focus();
-  };
-  taskInput.addEventListener("keydown", (event) => { if (event.key === "Enter") addTask(); });
-  const addButton = h("button", { class: "toolbar-button primary", onclick: addTask }, svg(ICONS.plus, 12), "Add task");
-  const taskComposer = h("div", { class: "task-composer" }, taskInput, taskDateInput, repoPicker, addButton);
-  const reminderTimeInput = h("input", { class: "reminder-time-picker", type: "time", value: reminderPrefs.time, title: "Your reminder time", "aria-label": "Your reminder time", onchange: (event: Event) => {
+/** The reminder switch shown under the task list. */
+function reminderRow(): HTMLElement {
+  const timeInput = h("input", { class: "reminder-time-picker", type: "time", value: reminderPrefs.time, title: "Your reminder time", "aria-label": "Your reminder time", onchange: (event: Event) => {
     const value = (event.currentTarget as HTMLInputElement).value;
     if (/^\d{2}:\d{2}$/.test(value)) { reminderPrefs.time = value; saveReminderPrefs(); processPlanReminders(); }
   } }) as HTMLInputElement;
-  const reminderToggle = h("button", { class: `reminder-toggle ${reminderPrefs.enabled ? "active" : ""}`, text: reminderPrefs.enabled ? "On" : "Off", onclick: () => {
-    if (reminderPrefs.enabled) { reminderPrefs.enabled = false; saveReminderPrefs(); renderFocus(); }
-    else void enablePlanReminders();
+  const row = h("div", { class: `plan-reminder-settings ${reminderPrefs.enabled ? "enabled" : ""}` });
+  const toggle = h("button", { class: `reminder-toggle ${reminderPrefs.enabled ? "active" : ""}`, text: reminderPrefs.enabled ? "On" : "Off", onclick: async () => {
+    if (reminderPrefs.enabled) { reminderPrefs.enabled = false; saveReminderPrefs(); }
+    else await enablePlanReminders();
+    row.classList.toggle("enabled", reminderPrefs.enabled);
+    toggle.classList.toggle("active", reminderPrefs.enabled);
+    toggle.textContent = reminderPrefs.enabled ? "On" : "Off";
   } });
-  const reminderSettings = h("div", { class: `plan-reminder-settings ${reminderPrefs.enabled ? "enabled" : ""}` },
+  row.append(
     h("span", { class: "reminder-icon" }, svg(ICONS.bell, 13)),
     h("div", { class: "reminder-copy" }, h("b", { text: "Daily reminders" }), h("small", { text: "Tasks repeat until done · notes remind once" })),
-    reminderTimeInput,
-    reminderToggle,
+    timeInput,
+    toggle,
   );
+  return row;
+}
 
-  const circumference = 2 * Math.PI * 62;
-  const timerSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  timerSvg.setAttribute("viewBox", "0 0 160 160");
-  timerSvg.classList.add("timer-ring");
-  const makeCircle = (className: string) => {
-    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("cx", "80"); circle.setAttribute("cy", "80"); circle.setAttribute("r", "62");
-    circle.classList.add(className);
-    return circle;
-  };
-  timerSvg.append(makeCircle("timer-track"));
-  const progress = makeCircle("timer-progress");
-  progress.style.strokeDasharray = String(circumference);
-  timerSvg.append(progress);
-  const timeLabel = h("div", { class: "timer-time", text: fmtClock(focus.remaining) });
-  const modeLabel = h("div", { class: "timer-mode-label", text: "FOCUS SESSION" });
-  const modes = h("div", { class: "timer-modes" });
-  const modeButtons: Record<FocusMode, HTMLButtonElement> = {
-    focus: h("button", { class: `timer-mode ${focus.mode === "focus" ? "active" : ""}`, text: "Focus", onclick: () => beginFocusMode("focus") }),
-    short: h("button", { class: `timer-mode ${focus.mode === "short" ? "active" : ""}`, text: "Short break", onclick: () => beginFocusMode("short") }),
-    long: h("button", { class: `timer-mode ${focus.mode === "long" ? "active" : ""}`, text: "Long break", onclick: () => beginFocusMode("long") }),
-  };
-  modes.append(modeButtons.focus, modeButtons.short, modeButtons.long);
-  const timerButtons = h("div", { class: "timer-buttons" });
-  const startButton = h("button", { class: "timer-start", text: focus.running ? "Pause" : focus.remaining < focusMinutesFor(focus.mode) * 60 ? "Resume" : "Start focus", onclick: () => {
-    if (focus.running && focus.endAt) {
-      focus.remaining = Math.max(0, Math.ceil((focus.endAt - Date.now()) / 1000));
-      focus.running = false;
-      focus.endAt = null;
-    } else {
-      if (focus.remaining <= 0) focus.remaining = focusMinutesFor(focus.mode) * 60;
-      focus.running = true;
-      focus.endAt = Date.now() + focus.remaining * 1000;
-    }
-    saveFocus();
-    renderFocus();
-  } });
-  const resetButton = h("button", { class: "timer-reset", title: "Reset timer", onclick: () => beginFocusMode(focus.mode) }, svg(ICONS.refresh, 13));
-  timerButtons.append(startButton, resetButton);
+/** Everything the Focus & tasks page borrows from the rest of the Hub. */
+const focusHost: FocusHost = {
+  data: () => focus,
+  save: saveFocus,
+  repos: () => catalog?.repositories ?? [],
+  lang: () => hubLanguage,
+  num: formatNumber,
+  date: formatDate,
+  clock: fmtClock,
+  dayKey,
+  datePicker: planDatePicker,
+  capture: (title, repo, kind, note, scheduledFor) => saveCapturedItem(title, repo, kind, note, scheduledFor),
+  openCapture: (kind) => openQuickCapture(kind),
+  reminderRow,
+  toast,
+  confetti: popConfetti,
+  notify: addFocusNotification,
+  activity: (title, repo) => recordActivity("task", title, repo, "Task completed"),
+};
+setFocusHost(focusHost);
 
-  const timer = h("section", { class: `focus-panel timer-panel ${focus.running ? "running" : ""}` },
-    h("div", { class: "focus-panel-head" }, h("div", {}, h("div", { class: "eyebrow", text: "POMODORO" }), h("h2", { text: "Make room to focus" })), h("span", { class: "timer-state", text: focus.running ? "IN SESSION" : "READY" })),
-    modes,
-    h("div", { class: "timer-visual" }, timerSvg, h("div", { class: "timer-center" }, timeLabel, modeLabel)),
-    focus.mode === "focus" ? h("div", { class: "timer-lengths" }, "Session", ...[15, 25, 45].map((minutes) => h("button", { class: `length-choice ${focus.focusMinutes === minutes ? "active" : ""}`, text: `${minutes}m`, onclick: () => {
-      focus.focusMinutes = minutes;
-      if (!focus.running) focus.remaining = minutes * 60;
-      saveFocus(); renderFocus();
-    } }))) : null,
-    timerButtons,
-    h("div", { class: "session-count" }, `${sessionsToday.length} focus ${sessionsToday.length === 1 ? "session" : "sessions"} completed today`),
-  );
-
-  const tasksPanel = h("section", { class: "focus-panel tasks-panel" },
-    h("div", { class: "focus-panel-head" }, h("div", {}, h("div", { class: "eyebrow", text: "YOUR PLAN" }), h("h2", { text: "Plan your work" })), h("span", { class: "task-count", text: `${openTasks.length} open` })),
-    taskComposer,
-    reminderSettings,
-    h("section", { class: "focus-section tasks-section" }, h("div", { class: "focus-section-head" }, h("div", { class: "focus-section-title" }, svg(ICONS.check, 13), h("b", { text: "Tasks" })), h("span", { class: "focus-section-count task-section-count", text: `${openTasks.length} open` })), taskList),
-    h("section", { class: `focus-section notes-section ${notes.length ? "" : "notes-section-empty"}` }, h("div", { class: "focus-section-head" }, h("div", { class: "focus-section-title notes-title" }, svg(ICONS.doc, 13), h("b", { text: "Notes" })), h("div", { class: "notes-head-actions" }, h("span", { class: "focus-section-count note-section-count", text: `${notes.length} notes` }), h("button", { class: "note-add-button", title: "Add note", onclick: () => openQuickCapture("note") }, svg(ICONS.plus, 12), h("span", { text: "Add note" })))), noteList),
-  );
-  mainContent.append(stats, h("div", { class: "focus-layout" }, tasksPanel, timer));
-
-  function tick() {
-    if (focus.running && focus.endAt) {
-      const remaining = Math.ceil((focus.endAt - Date.now()) / 1000);
-      if (remaining <= 0) {
-        finishFocusSession();
-        return;
-      }
-      focus.remaining = remaining;
-      timeLabel.textContent = fmtClock(remaining);
-      startButton.textContent = "Pause";
-      timer.classList.add("running");
-      const total = focusMinutesFor(focus.mode) * 60;
-      progress.style.strokeDashoffset = String(circumference * (1 - Math.min(1, remaining / total)));
-    } else {
-      const total = focusMinutesFor(focus.mode) * 60;
-      progress.style.strokeDashoffset = String(circumference * (1 - Math.min(1, focus.remaining / total)));
-    }
-  }
-  tick();
-  focusTick = window.setInterval(tick, 1000);
+function renderFocus() {
+  clear(mainContent);
+  renderFocusPage(mainContent, focusHost);
 }
 
 function openProjectSearch() {
@@ -1285,6 +1178,10 @@ function openCommandPalette() {
       { title: "Notifications", detail: "Review, mute or snooze Coucou alerts", icon: ICONS.bell, run: openNotificationCenter },
       { title: "Music for work", detail: "Open your music preferences and mixes", icon: ICONS.music, run: () => setPage("music") },
       { title: "Surprise me with music", detail: "Search YouTube Music using your saved taste", icon: ICONS.shuffle, run: () => { setPage("music"); openMusicSearch(randomQuery()); } },
+      music.state.playing
+        ? { title: "Stop the music", detail: "Mochi takes the headphones off · Ctrl Shift M", icon: ICONS.speakerOff, run: () => music.stop() }
+        : { title: "Play Mochi Radio", detail: "A random station, composed live · Ctrl Shift M", icon: ICONS.music, run: surpriseStation },
+      ...STATIONS.map((st): HubCommand => ({ title: st.name, detail: st.tagline, icon: ICONS.music, run: () => music.play(st.id, "manual") })),
       { title: "Refresh repositories", detail: "Fetch the latest repository details", icon: ICONS.refresh, run: () => { setPage("repositories"); void loadRepos(); } },
       { title: "Refresh work queue", detail: "Sync your assigned GitHub work", icon: ICONS.refresh, run: () => { if (page !== "queue") setPage("queue"); else void loadQueue(); } },
     ];
@@ -1467,16 +1364,20 @@ processSnoozedNotifications();
 processPlanReminders();
 window.setInterval(processSnoozedNotifications, 15_000);
 window.setInterval(processPlanReminders, 30_000);
-window.setInterval(() => { if (focus.running && focus.endAt && focus.endAt <= Date.now()) finishFocusSession(); }, 1000);
+window.setInterval(tickFocus, 1000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     processSnoozedNotifications();
     processPlanReminders();
-    if (focus.running && focus.endAt && focus.endAt <= Date.now()) finishFocusSession();
+    tickFocus();
   }
 });
 
 document.addEventListener("keydown", (event) => {
+  if (page === "focus" && focusKeydown(event)) {
+    event.preventDefault();
+    return;
+  }
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "f") {
     event.preventDefault();
     openProjectSearch();
@@ -1486,5 +1387,9 @@ document.addEventListener("keydown", (event) => {
   } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "n") {
     event.preventDefault();
     openQuickCapture();
+  } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "m") {
+    event.preventDefault();
+    if (music.state.playing) music.stop();
+    else surpriseStation();
   }
 });

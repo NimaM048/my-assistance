@@ -41,7 +41,7 @@ interface Tween {
 
 type PropKey =
   | "yaw" | "pitch" | "roll" | "tilt" | "open" | "sx" | "sy"
-  | "oy" | "ox" | "tint" | "morph" | "hands" | "blush" | "es" | "badgeS";
+  | "oy" | "ox" | "tint" | "morph" | "hands" | "blush" | "es" | "badgeS" | "phones";
 
 interface BotStateCfg {
   color: RGB;
@@ -241,6 +241,19 @@ export class BotEngine {
   yaw = 0; pitch = 0; roll = 0; tilt = 0; open = 1;
   sx = 1; sy = 1; oy = 0; ox = 0;
   tint = 0; morph = 0; hands = 0; blush = 0; es = 1; badgeS = 0;
+  /** Headphones on (1) or off (0) — Mochi puts them on when music plays. */
+  phones = 0;
+  phonesColors: [string, string] = ["#ff8fab", "#ffd166"];
+
+  // Dancing to the music. `grooveTarget` and `beatPos` are fed by the owner
+  // every frame; the offsets below are added on top of everything else, so
+  // the groove never fights a running emote.
+  grooveTarget = 0;
+  beatPos: number | null = null;
+  private groove = 0;
+  private gOy = 0;
+  private gTilt = 0;
+  private gSq = 0;
 
   // Targets
   tgYaw = 0; tgPitch = 0; tgTilt = 0; tgSy = 1; tgSx = 1; tgEs = 1;
@@ -663,6 +676,14 @@ export class BotEngine {
     this.mouthUntil = now() + seconds;
   }
 
+  /** Puts the headphones on or takes them off, with a little bounce. */
+  wearPhones(on: boolean) {
+    const target = on ? 1 : 0;
+    if (Math.abs(this.phones - target) < 0.01 && !this.tweens.has("phones")) return;
+    this.anim("phones", on ? [[1, 480, Ease.back]] : [[0, 320, Ease.inOut]]);
+    if (on) this.anim("sy", [[0.9, 110, Ease.out], [1.04, 180, Ease.out], [1, 200, Ease.back]]);
+  }
+
   /** True while an emote or fidget is still playing — don't stack another one. */
   get emoting(): boolean {
     return now() < this.eyeOverrideUntil && this.eyeOverrideUntil !== Number.POSITIVE_INFINITY;
@@ -721,6 +742,7 @@ export class BotEngine {
       Math.abs(this.tgEs - this.es) > 0.002 ||
       this.slotH > 0.001 || Math.abs(this.slotHVel) > 0.001 ||
       Math.abs((this.wantedMouth() === "none" ? 0 : 1) - this.mouthS) > 0.01 ||
+      this.groove > 0.01 || this.grooveTarget > 0 ||
       Math.abs(this.col[0] - this.colT[0]) > 0.003 ||
       Math.abs(this.col[1] - this.colT[1]) > 0.003 ||
       Math.abs(this.col[2] - this.colT[2]) > 0.003
@@ -845,6 +867,22 @@ export class BotEngine {
     for (const p of this.particles) p.age += dt;
     this.particles = this.particles.filter((p) => p.age < p.life);
 
+    // Groove: bob up between beats, a tiny squash right on the beat, and a
+    // sway that takes two beats — applied directly (not smoothed) so it stays
+    // locked to the music.
+    this.groove += (this.grooveTarget - this.groove) * (1 - Math.pow(0.05, dt));
+    if (this.groove > 0.01 && this.beatPos != null && this.state !== "dizzy" && this.state !== "sleeping") {
+      const ph = this.beatPos % 1;
+      const g = this.groove * (this.isMini ? 1.4 : 1);
+      this.gOy = -Math.sin(Math.PI * ph) * 0.075 * g;
+      this.gSq = Math.pow(1 - ph, 6) * 0.07 * g;
+      this.gTilt = Math.sin(Math.PI * this.beatPos) * 0.075 * g;
+    } else {
+      this.gOy = 0;
+      this.gSq = 0;
+      this.gTilt = 0;
+    }
+
     // The little mouth eases in and out rather than popping.
     const wanted = this.wantedMouth();
     if (wanted !== "none") {
@@ -940,14 +978,15 @@ export class BotEngine {
     const rx = R * 1.14;
     const ry = R * 0.88;
     const cx = W / 2 + this.ox * R;
-    const cy = this.particleOverhang + boxW / 2 + this.oy * R + R * 0.06;
+    const cy = this.particleOverhang + boxW / 2 + (this.oy + this.gOy) * R + R * 0.06;
+    const tilt = this.tilt + this.gTilt;
 
     this.drawHandsBehind(x, R, rx, ry, cx, cy);
 
     x.save();
     x.translate(cx, cy);
-    if (this.tilt !== 0) x.rotate(this.tilt);
-    x.scale(this.sx, this.sy);
+    if (tilt !== 0) x.rotate(tilt);
+    x.scale(this.sx * (1 + this.gSq * 0.6), this.sy * (1 - this.gSq));
 
     const body = this.bodyPath(rx, ry, R);
     this.drawBody(x, body, R, rx, ry);
@@ -969,6 +1008,7 @@ export class BotEngine {
     this.drawEyes(x, body, R, rx, ry);
     if (this.mouthS > 0.02 && this.mouthDrawn !== "none") this.drawFaceMouth(x, body, R, rx, ry);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
+    if (this.phones > 0.01 && !this.isMini) this.drawPhones(x, R, rx, ry);
 
     x.restore();
 
@@ -1224,6 +1264,48 @@ export class BotEngine {
     }
   }
 
+  /** Big cosy headphones: a band over the head and two cups at the sides. */
+  private drawPhones(x: CanvasRenderingContext2D, R: number, rx: number, ry: number) {
+    const k = Math.min(1, this.phones);
+    x.save();
+    // They drop on from above as they appear.
+    x.translate(0, -(1 - k) * R * 0.9);
+    x.globalAlpha = Math.min(1, k * 1.6);
+    x.lineCap = "round";
+
+    x.strokeStyle = "#454a59";
+    x.lineWidth = R * 0.13;
+    x.beginPath();
+    x.ellipse(0, -ry * 0.08, rx * 1.04, ry * 1.1, 0, Math.PI * 1.07, Math.PI * 1.93);
+    x.stroke();
+    x.strokeStyle = "rgba(255,255,255,0.22)";
+    x.lineWidth = R * 0.035;
+    x.beginPath();
+    x.ellipse(0, -ry * 0.1, rx * 1.04, ry * 1.08, 0, Math.PI * 1.2, Math.PI * 1.55);
+    x.stroke();
+
+    const [c0, c1] = this.phonesColors;
+    for (const sd of [-1, 1]) {
+      const px = sd * rx * 1.0;
+      const py = -ry * 0.02;
+      const w = R * 0.3;
+      const h = R * 0.54;
+      const g = x.createLinearGradient(px, py - h / 2, px, py + h / 2);
+      g.addColorStop(0, c0);
+      g.addColorStop(1, c1);
+      roundRectPath(x, px - w / 2, py - h / 2, w, h, w * 0.48);
+      x.fillStyle = g;
+      x.fill();
+      x.strokeStyle = "rgba(20,22,30,0.55)";
+      x.lineWidth = R * 0.035;
+      x.stroke();
+      x.fillStyle = "rgba(255,255,255,0.45)";
+      roundRectPath(x, px - w * 0.22 + sd * w * 0.04, py - h * 0.36, w * 0.18, h * 0.32, w * 0.09);
+      x.fill();
+    }
+    x.restore();
+  }
+
   /** A soft white reflection in the eye — the single biggest "alive" cue. */
   private catchlight(x: CanvasRenderingContext2D, w: number, hh: number, strength: number) {
     if (this.isMini || hh < w * 0.7) return;
@@ -1422,8 +1504,8 @@ export class BotEngine {
         localY = hhB * 0.7;
       }
 
-      const cosT = Math.cos(this.tilt);
-      const sinT = Math.sin(this.tilt);
+      const cosT = Math.cos(this.tilt + this.gTilt);
+      const sinT = Math.sin(this.tilt + this.gTilt);
       const worldX = cx + cosT * localX - sinT * localY;
       const worldY = cy + sinT * localX + cosT * localY;
 

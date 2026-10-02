@@ -28,6 +28,8 @@ export interface ViewActions {
   setAutoClose(seconds: number): void;
   openSettingsWindow(): void;
   blip(): void;
+  /** Header ♪: start or stop the music. */
+  toggleMusic(): void;
 }
 
 export interface ViewHost {
@@ -88,6 +90,9 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
   const hubBtn = h("button", { title: "Open Coucou Hub", onclick: () => void Bridge.openHubWindow() }, svg(ICONS.grid, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
+  // ♪ shows a little equaliser while music plays.
+  const eq = h("span", { class: "eq", "aria-hidden": "true" }, h("i"), h("i"), h("i"));
+  const musicBtn = h("button", { class: "music-btn", title: "Music", "aria-label": "Music", onclick: () => actions.toggleMusic() }, svg(ICONS.music, 13), eq);
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -101,7 +106,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs", role: "tablist" }, indicator, ...tabs),
-    h("div", { class: "header-actions" }, hubBtn, gearBtn, soundBtn),
+    h("div", { class: "header-actions" }, musicBtn, hubBtn, gearBtn, soundBtn),
   );
   for (const t of tabs) t.setAttribute("role", "tab");
 
@@ -127,6 +132,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
       clear(soundBtn);
       soundBtn.append(svg(State.settings.soundEnabled ? ICONS.speakerOn : ICONS.speakerOff, 14));
       el.style.opacity = v === "confused" ? "0" : "1";
+      musicBtn.classList.toggle("playing", State.music.playing);
+      musicBtn.title = State.music.playing ? "Stop the music" : "Play some music";
     },
   };
 }

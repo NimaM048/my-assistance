@@ -382,6 +382,21 @@ body {
   color: var(--ink);
 }
 
+/* ♪ — becomes a dancing equaliser while music plays. */
+.music-btn .eq { display: none; height: 11px; align-items: flex-end; gap: 1.5px; }
+.music-btn.playing svg { display: none; }
+.music-btn.playing .eq { display: inline-flex; }
+.music-btn.playing { color: #ffb3c8; }
+.music-btn .eq i { width: 2.5px; border-radius: 2px; background: currentColor; animation: eq-bar 0.9s ease-in-out infinite; }
+.music-btn .eq i:nth-child(1) { height: 5px; animation-delay: -0.2s; }
+.music-btn .eq i:nth-child(2) { height: 11px; animation-delay: -0.5s; }
+.music-btn .eq i:nth-child(3) { height: 7px; animation-delay: -0.1s; }
+
+@keyframes eq-bar {
+  0%, 100% { transform: scaleY(0.35); transform-origin: bottom; }
+  50% { transform: scaleY(1); transform-origin: bottom; }
+}
+
 /* The gear turns a little when you point at it. */
 .header-actions button[title="Settings"] svg { transition: transform 0.5s var(--ease-spring); }
 .header-actions button[title="Settings"]:hover svg { transform: rotate(60deg); }

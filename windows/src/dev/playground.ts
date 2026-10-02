@@ -57,6 +57,8 @@ const hook = (payload: Record<string, unknown>) => emitLocal("hook", { cwd: CWD,
 
 let running = 0;
 
+const playStation = (station: string) => emitLocal("music-command", { action: "play", station, reason: "manual" });
+
 async function session() {
   const token = ++running;
   const steps: Record<string, unknown>[] = [
@@ -171,6 +173,16 @@ export function mountPlayground(island: Island) {
       ["Rate limit", () => hook({ hook_event_name: "Notification", message: "Rate limit reached" })],
       ["End session", () => { running++; hook({ hook_event_name: "SessionEnd" }); }],
     ]),
+    group("Music", [
+      ["🫧 Bounce", () => playStation("bounce")],
+      ["🌙 Lo-fi", () => playStation("lofi")],
+      ["🎮 Chiptune", () => playStation("chiptune")],
+      ["🎠 Music box", () => playStation("musicbox")],
+      ["🌧 Rain", () => playStation("rain")],
+      ["■ Stop", () => emitLocal("music-command", { action: "stop" })],
+      ["Jingle ✓", () => emitLocal("music-command", { action: "jingle", kind: "finish" })],
+      ["Jingle ✗", () => emitLocal("music-command", { action: "jingle", kind: "error" })],
+    ], "A running session plays work music on its own (Settings → Music in the Hub to change it)."),
     group("Integrations", [
       ["Vercel ✓", () => integration("integration_vercel", true)],
       ["Vercel ✗", () => integration("integration_vercel", false)],

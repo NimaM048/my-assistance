@@ -72,11 +72,20 @@ export function syncMiniBotStates(tasks: AgentTask[]) {
   }
 }
 
+/** The music the pills dance to: same beat as the big Mochi. */
+let groove = { target: 0, beatPos: null as number | null };
+
+export function setMiniGroove(target: number, beatPos: number | null) {
+  groove = { target, beatPos };
+}
+
 export function tickMiniBots(dt: number) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   for (const mb of live.values()) {
     const ctx = mb.canvas.getContext("2d");
     if (!ctx) continue;
+    mb.engine.grooveTarget = groove.target;
+    mb.engine.beatPos = groove.beatPos;
     mb.engine.update(dt);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, mb.cssSize, mb.cssSize);

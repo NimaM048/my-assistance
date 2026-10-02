@@ -13,7 +13,9 @@ import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import { BotEngine, EMOTE_SOUND, hexToRGB, pickFidget } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
-import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
+import { createMiniBot, pruneMiniBots, setMiniGroove, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
+import type { MusicHost } from "../music/host";
+import { stationById } from "../music/stations";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -109,6 +111,9 @@ export class Island {
   private petTurns: number[] = [];
   private lastPet = 0;
   private reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+  private music: MusicHost | null = null;
+  private lastAgentState: string | null = null;
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
 
@@ -195,6 +200,7 @@ export class Island {
       },
       openSettingsWindow: () => void Bridge.openSettingsWindow(),
       blip: () => Sound.play("blip"),
+      toggleMusic: () => this.music?.command({ action: "toggle", reason: "manual" }),
     };
 
     this.wakeStrip = h("div", { id: "wake-strip" });
@@ -333,6 +339,43 @@ export class Island {
     if (!calm || busyView || this.engine.emoting || this.botHovering) return;
     this.engine.triggerEmote(pickFidget(new Date().getHours()));
     this.ensureRunning();
+  }
+
+  // ── Music ───────────────────────────────────────────────────────────────────
+
+  /**
+   * Plugs the music host in: Mochi puts headphones on while music plays, bobs
+   * on every beat, and now and then breaks into a dance on the downbeat.
+   */
+  attachMusic(host: MusicHost) {
+    this.music = host;
+    host.engine.subscribe((e) => {
+      if (e.type === "state") {
+        const { playing, station, ducked } = e.state;
+        const started = playing && !State.music.playing;
+        State.music = { playing, station, ducked };
+        const st = stationById(station);
+        this.engine.phonesColors = st.colors;
+        this.engine.wearPhones(playing);
+        if (started && State.mode !== "hidden") this.engine.triggerEmote("excited", 1.1);
+        State.notify();
+      } else if (e.type === "beat") {
+        this.onBeat(e.bar, e.downbeat);
+      } else if (e.type === "jingle") {
+        this.engine.triggerEmote(e.kind === "finish" ? "celebrate" : "pout");
+        this.ensureRunning();
+      }
+    });
+  }
+
+  private onBeat(bar: number, downbeat: boolean) {
+    if (State.mode === "hidden" || this.reducedMotion || State.music.ducked) return;
+    if (!downbeat) return;
+    if (bar % 2 === 1 && Math.random() < 0.55) this.engine.emit("note", 1);
+    if (bar > 0 && bar % 8 === 0 && !this.engine.emoting && !this.botHovering && State.stateOverride == null) {
+      const moves: BotEmoteName[] = ["dance", "dance", "spin", "hop", "whistle", "giggle"];
+      this.engine.triggerEmote(moves[Math.floor(Math.random() * moves.length)]);
+    }
   }
 
   /** An emote the user caused, with its sound. */
@@ -888,6 +931,12 @@ export class Island {
         this.engine.slotHVel = 0;
       }
     }
+    // Groove with the music (gently while it is turned down for an alert).
+    const beatPos = this.music?.engine.beatPos() ?? null;
+    const groove = beatPos == null ? 0 : State.music.ducked ? 0.3 : 1;
+    this.engine.grooveTarget = this.reducedMotion ? 0 : groove;
+    this.engine.beatPos = beatPos;
+    setMiniGroove(this.reducedMotion ? 0 : groove * 0.8, beatPos);
     this.engine.update(dt);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, wCss, hCss);
@@ -972,6 +1021,13 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+
+    // The Claude Code / Codex pill decides whether there is work music.
+    const agent = State.tasks.find((t) => t.id === "integration_claude")?.state ?? "idle";
+    if (agent !== this.lastAgentState) {
+      this.lastAgentState = agent;
+      this.music?.agent(agent);
+    }
   }
 
   /**

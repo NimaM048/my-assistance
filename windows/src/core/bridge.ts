@@ -3,7 +3,7 @@
 // `npm run dev` alone.
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Settings } from "./state";
 
@@ -264,6 +264,19 @@ const localHandlers = new Map<string, Set<(payload: unknown) => void>>();
 
 export function emitLocal(name: string, payload: unknown) {
   for (const fn of localHandlers.get(name) ?? []) fn(payload);
+}
+
+/**
+ * Sends an event to every Coucou window (island, Hub, settings) — used for the
+ * music player, which lives in the island and is driven from the Hub. In a
+ * plain browser it stays inside the page.
+ */
+export function broadcast(name: string, payload: unknown) {
+  if (!IS_TAURI) {
+    emitLocal(name, payload);
+    return;
+  }
+  void emit(name, payload).catch((err) => console.error(`[coucou] broadcast ${name} failed`, err));
 }
 
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {

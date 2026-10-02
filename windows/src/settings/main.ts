@@ -9,6 +9,9 @@ import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
 import { BotEngine, type RGB } from "../mochi/engine";
 import { mochiPortrait } from "../mochi/portrait";
+import { music } from "../music/remote";
+import { readMusicPrefs, writeMusicPrefs } from "../music/prefs";
+import { STATIONS, type StationId } from "../music/stations";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -455,6 +458,65 @@ function generalSection(): HTMLElement {
   );
 }
 
+// ── Music section ─────────────────────────────────────────────────────────────
+
+function musicSection(): HTMLElement {
+  const p = readMusicPrefs();
+  const stationSelect = (value: string, withAuto: boolean, label: string, onChange: (v: string) => void) => {
+    const sel = h("select", { "aria-label": label }) as HTMLSelectElement;
+    if (withAuto) sel.append(h("option", { value: "auto", text: "🎲  Surprise me" }));
+    for (const st of STATIONS) sel.append(h("option", { value: st.id, text: `${st.emoji}  ${st.name}` }));
+    sel.value = value;
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+  };
+
+  const volume = h("input", { type: "range", min: "0", max: "1", step: "0.01", value: String(p.volume), "aria-label": "Music volume" }) as HTMLInputElement;
+  const paint = () => volume.style.setProperty("--fill", `${Number(volume.value) * 100}%`);
+  paint();
+  volume.addEventListener("input", () => {
+    writeMusicPrefs({ volume: Number(volume.value) });
+    paint();
+  });
+
+  // Preview plays the chosen work station for a few seconds.
+  let previewTimer = 0;
+  const preview = h("button", { text: "Preview", onclick: () => {
+    const prefs = readMusicPrefs();
+    const station = (prefs.workStation === "auto" ? "bounce" : prefs.workStation) as StationId;
+    if (music.state.playing && music.state.reason === "manual") {
+      music.stop("manual");
+      return;
+    }
+    music.play(station, "manual");
+    window.clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(() => music.stop("manual"), 8000);
+  } });
+  music.onState((s) => {
+    preview.textContent = s.playing && s.reason === "manual" ? "Stop preview" : "Preview";
+  });
+
+  return h(
+    "section",
+    { class: "card" },
+    cardHead(ICONS.music, "Music", "Mochi composes its own little tunes on this PC — nothing is streamed or downloaded.", badge("Offline", "ok")),
+    h("div", { class: "prefs" },
+      pref("While your agent works", "Plays while Claude Code or Codex is busy, turns down for questions, and stops when it's done.",
+        stationSelect(p.workStation, true, "Work station", (v) => writeMusicPrefs({ workStation: v as StationId | "auto" })),
+        toggle(p.workMusic, (v) => writeMusicPrefs({ workMusic: v }), "Music while your agent works"),
+      ),
+      pref("During focus sessions", "Starts with a Hub pomodoro and stops for breaks.",
+        stationSelect(p.focusStation, false, "Focus station", (v) => writeMusicPrefs({ focusStation: v as StationId })),
+        toggle(p.focusMusic, (v) => writeMusicPrefs({ focusMusic: v }), "Music during focus sessions"),
+      ),
+      pref("Victory jingles", "A tiny fanfare when a session finishes.",
+        toggle(p.jingles, (v) => writeMusicPrefs({ jingles: v }), "Victory jingles"),
+      ),
+      pref("Music volume", "Separate from Mochi's little sound effects.", volume, preview),
+    ),
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -486,6 +548,7 @@ async function main() {
     claudeSection(status),
     codexChatSection(),
     integrationsSection(present),
+    musicSection(),
     generalSection(),
     h("footer", { class: "foot" },
       svg(ICONS.lock, 12),

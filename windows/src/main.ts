@@ -7,6 +7,7 @@ import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
+import { startMusicHost } from "./music/host";
 
 async function main() {
   const root = document.getElementById("root");
@@ -59,6 +60,9 @@ async function main() {
     State.loadIntegrationTasks();
     void refreshConfigured();
   });
+
+  // The island is the one window that is never throttled, so music lives here.
+  island.attachMusic(startMusicHost());
 
   registerHookHandlers(island);
   registerIntegrationHandlers(island);

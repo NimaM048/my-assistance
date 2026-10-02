@@ -278,6 +278,61 @@ function drawHat(x: Ctx, id: string, g: OutfitGeom) {
       x.fill();
       break;
     }
+    case "sabzeh": {
+      // Nowruz wheatgrass in a little dish, tied with a red ribbon.
+      x.translate(0, -ry * 0.9);
+      x.fillStyle = "#e9e2d0";
+      rr(x, -R * 0.3, -R * 0.1, R * 0.6, R * 0.14, R * 0.06);
+      x.fill();
+      for (let i = 0; i < 22; i++) {
+        const px = -R * 0.26 + (i / 21) * R * 0.52;
+        const hgt = R * (0.3 + ((i * 37) % 10) / 40);
+        const sway = Math.sin(t * 2 + i) * R * 0.03;
+        x.strokeStyle = i % 3 ? "#5fbf5f" : "#7fd86f";
+        x.lineWidth = R * 0.035;
+        x.lineCap = "round";
+        x.beginPath();
+        x.moveTo(px, -R * 0.08);
+        x.quadraticCurveTo(px + sway * 0.5, -R * 0.08 - hgt * 0.6, px + sway, -R * 0.08 - hgt);
+        x.stroke();
+      }
+      x.fillStyle = "#e23d4b";
+      rr(x, -R * 0.3, -R * 0.2, R * 0.6, R * 0.07, R * 0.03);
+      x.fill();
+      for (const sd of [-1, 1]) {
+        x.beginPath();
+        x.ellipse(sd * R * 0.08, -R * 0.2, R * 0.08, R * 0.045, sd * 0.4, 0, Math.PI * 2);
+        x.fill();
+      }
+      break;
+    }
+    case "pomegranate": {
+      // Yalda's pomegranate, perched on top with its little crown.
+      x.translate(R * 0.12, -ry * 0.96);
+      x.rotate(0.2);
+      const pg = x.createRadialGradient(-R * 0.08, -R * 0.12, R * 0.02, 0, -R * 0.02, R * 0.26);
+      pg.addColorStop(0, "#ff7a86");
+      pg.addColorStop(1, "#b3122c");
+      x.fillStyle = pg;
+      x.beginPath();
+      x.arc(0, -R * 0.06, R * 0.24, 0, Math.PI * 2);
+      x.fill();
+      x.fillStyle = "#8f0f24";
+      x.beginPath();
+      x.moveTo(-R * 0.08, -R * 0.27);
+      for (let i = 0; i < 5; i++) {
+        const px = -R * 0.08 + i * R * 0.04;
+        x.lineTo(px, -R * (i % 2 ? 0.34 : 0.4));
+      }
+      x.lineTo(R * 0.08, -R * 0.27);
+      x.closePath();
+      x.fill();
+      x.fillStyle = "rgba(255,255,255,.4)";
+      x.beginPath();
+      x.ellipse(-R * 0.1, -R * 0.14, R * 0.06, R * 0.035, -0.6, 0, Math.PI * 2);
+      x.fill();
+      break;
+    }
     case "wizard": {
       x.translate(R * 0.08, -ry * 0.78);
       x.rotate(-0.16);

@@ -18,6 +18,9 @@ import { STATIONS, type StationId } from "../music/stations";
 import type { GitHubRepository } from "../core/bridge";
 import type { FocusData, FocusMode, FocusTask, Priority } from "./types";
 import { XP, awardXp } from "../mochi/growth";
+import { occasionFor } from "../mochi/occasions";
+import { profileStore } from "../core/profile";
+import { openOccasion } from "./occasion";
 
 /** What the page needs from the rest of the Hub. */
 export interface FocusHost {
@@ -68,7 +71,9 @@ let musicWired = false;
 
 // Elements of the current render.
 let root: HTMLElement | null = null;
+let greetKey = "";
 const ui = {} as {
+  hero: HTMLElement; celebrate: HTMLButtonElement;
   greetTitle: HTMLElement; greetSub: HTMLElement; dateLine: HTMLElement;
   ringProgress: SVGCircleElement; ringValue: HTMLElement; ringTotal: HTMLElement;
   focusValue: HTMLElement; goalValue: HTMLElement; goalFill: HTMLElement;
@@ -165,7 +170,11 @@ function buildHero(): HTMLElement {
 
   ui.dateLine = h("div", { class: "eyebrow fx-date" });
   ui.greetTitle = h("h2", { class: "fx-greet" });
-  ui.greetSub = h("p", { class: "fx-greet-sub" });
+  ui.greetSub = h("div", { class: "fx-greet-sub" });
+  ui.celebrate = h("button", { class: "fx-celebrate", hidden: true, onclick: () => {
+    const occ = occasionFor();
+    if (occ) openOccasion(occ, host);
+  } }, h("span", { text: "Celebrate" }), h("span", { "aria-hidden": "true", text: " ✨" })) as HTMLButtonElement;
 
   const ring = svgEl("svg", { viewBox: "0 0 64 64", class: "fx-mini-ring", "aria-hidden": "true" });
   ring.append(svgEl("circle", { cx: 32, cy: 32, r: HERO_R, class: "fx-mini-track" }));
@@ -191,7 +200,7 @@ function buildHero(): HTMLElement {
   ui.week = h("div", { class: "fx-week" });
   ui.weekTotal = h("span", { class: "fx-week-total" });
 
-  return h("section", { class: "fx-hero" },
+  ui.hero = h("section", { class: "fx-hero" },
     mochiSlot,
     h("div", { class: "fx-hero-copy" }, ui.dateLine, ui.greetTitle, ui.greetSub),
     h("div", { class: "fx-hero-stats" },
@@ -218,6 +227,7 @@ function buildHero(): HTMLElement {
       ),
     ),
   );
+  return ui.hero;
 }
 
 function buildTasks(): HTMLElement {
@@ -397,6 +407,40 @@ function buildTimer(): HTMLElement {
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 
+/** The greeting: today's occasion if there is one, else the time of day and your name. */
+function drawGreeting(sub: string) {
+  const occ = occasionFor();
+  const name = profileStore.read().name.trim();
+  const key = [occ?.id, occ?.greeting, name, greeting(), sub, host.lang()].join("|");
+  if (key === greetKey) return;
+  greetKey = key;
+
+  ui.hero.dataset.occasion = occ?.id ?? "";
+  if (occ) {
+    ui.hero.style.setProperty("--o0", occ.colors[0]);
+    ui.hero.style.setProperty("--o1", occ.colors[1]);
+  }
+  ui.celebrate.hidden = !occ;
+  clear(ui.greetTitle);
+  clear(ui.greetSub);
+  ui.celebrate.title = occ?.invite ?? "";
+  if (occ && host.lang() === "fa") {
+    // In Persian the greeting itself is the title.
+    // The emoji gets its own span: gradient text would paint it flat.
+    const [, words, emoji] = /^(.*?)\s*(\p{Extended_Pictographic}\uFE0F?)?$/u.exec(occ.greeting) ?? [, occ.greeting, ""];
+    ui.greetTitle.append(h("span", { dir: "rtl", text: words }));
+    if (emoji) ui.greetTitle.append(h("span", { class: "fx-greet-emoji", "aria-hidden": "true", text: `\u00a0${emoji}` }));
+    ui.greetSub.append(ui.celebrate);
+  } else if (occ) {
+    ui.greetTitle.append(h("span", { text: occ.title }));
+    ui.greetSub.append(h("span", { class: "fx-greet-fa", dir: "rtl", text: occ.greeting }), ui.celebrate);
+  } else {
+    ui.greetTitle.append(h("span", { text: greeting() }));
+    if (name) ui.greetTitle.append(h("span", { class: "fx-greet-name", text: `${host.lang() === "fa" ? "،" : ","} ${name}` }));
+    ui.greetSub.append(h("span", { text: sub }));
+  }
+}
+
 function drawHero() {
   const d = host.data();
   const day = today();
@@ -406,13 +450,13 @@ function drawHero() {
   const minutes = minutesOn(day);
 
   ui.dateLine.textContent = host.date(new Date(), { weekday: "long", month: "long", day: "numeric" });
-  ui.greetTitle.textContent = greeting();
-  ui.greetSub.textContent =
+  const sub =
     total > 0 && done === total ? "Everything's done. Mochi is proud of you!"
       : minutes >= goal() ? "Focus goal reached — take a real break."
         : total === 0 ? "Plan one small win to get started."
           : done > 0 ? "Nice momentum — keep it gentle."
             : "One step at a time — you've got this.";
+  drawGreeting(sub);
 
   ui.ringValue.textContent = host.num(done);
   ui.ringTotal.textContent = `/${host.num(total)}`;

@@ -10,6 +10,7 @@ import { Composer, STATIONS, stationById, type Station, type StationId } from ".
 import { bell, chip, makeNoise, wah, type Rig } from "./synth";
 
 export type MusicReason = "work" | "focus" | "manual";
+export type JingleKind = "finish" | "error" | "birthday";
 
 export interface MusicState {
   playing: boolean;
@@ -24,7 +25,7 @@ export interface MusicState {
 export type MusicEvent =
   | { type: "beat"; beat: number; bar: number; downbeat: boolean }
   | { type: "state"; state: MusicState }
-  | { type: "jingle"; kind: "finish" | "error" };
+  | { type: "jingle"; kind: JingleKind };
 
 const LOOKAHEAD = 0.14; // seconds of notes scheduled ahead
 const TICK_MS = 25;
@@ -197,7 +198,7 @@ export class MusicEngine {
   }
 
   /** A short tune on top of (or instead of) the music: a win or a fail. */
-  jingle(kind: "finish" | "error") {
+  jingle(kind: JingleKind) {
     const ctx = this.ensureCtx();
     this.cancelSuspend();
     void ctx.resume();
@@ -213,6 +214,25 @@ export class MusicEngine {
       });
       for (const m of [84, 88, 91]) bell(r, t + 0.42, m, 1.2, 0.7);
       for (let i = 0; i < 5; i++) bell(r, t + 0.55 + i * 0.07, 96 + [0, 4, 7, 12, 16][i], 0.4, 0.35);
+    } else if (kind === "birthday") {
+      // "Happy Birthday" (public domain), in 3/4 with a little bell accompaniment.
+      const beat = 0.5;
+      const tune: [number, number][] = [
+        [67, 0.75], [67, 0.25], [69, 1], [67, 1], [72, 1], [71, 2],
+        [67, 0.75], [67, 0.25], [69, 1], [67, 1], [74, 1], [72, 2],
+        [67, 0.75], [67, 0.25], [79, 1], [76, 1], [72, 1], [71, 1], [69, 2],
+        [77, 0.75], [77, 0.25], [76, 1], [72, 1], [74, 1], [72, 3],
+      ];
+      let at = t;
+      for (const [m, len] of tune) {
+        bell(r, at, m + 12, len * beat, 0.9);
+        chip(r, at, m, len * beat * 0.9, 0.35, false);
+        at += len * beat;
+      }
+      for (let bar = 0; bar < 8; bar++) {
+        const root = [60, 55, 55, 60, 60, 65, 60, 60][bar];
+        bell(r, t + 0.25 * beat * 4 + bar * 3 * beat, root, 1.2, 0.35);
+      }
     } else {
       [67, 66, 65].forEach((m, i) => wah(r, t + i * 0.36, m, 0.32, 1));
       wah(r, t + 1.08, 64, 1.0, 1);

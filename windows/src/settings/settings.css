@@ -605,3 +605,24 @@ button.save.failed {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── About you ─────────────────────────────────────────────────────────── */
+
+.name-input { width: 200px; }
+.day-select { width: 72px; }
+.about-upcoming { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 2px; }
+.about-today { color: var(--dim); font-size: 12px; }
+.occ-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.occ-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--o0) 30%, transparent);
+  border-radius: 999px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--o0) 14%, transparent), color-mix(in srgb, var(--o1) 8%, transparent));
+  font-size: 12px;
+}
+.occ-chip b { font-weight: 600; }
+.occ-chip small { color: var(--dim); font-size: 11px; }
+.occ-chip.bday { border-color: color-mix(in srgb, var(--o0) 55%, transparent); }

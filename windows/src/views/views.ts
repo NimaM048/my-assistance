@@ -10,6 +10,8 @@ import { Bridge, type ProjectStatus } from "../core/bridge";
 import { captureHandoff, handoffPrompt, latestHandoff, saveNextStep } from "../core/handoff";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
+import { occasionFor } from "../mochi/occasions";
+import { profileStore } from "../core/profile";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
@@ -375,8 +377,21 @@ function buildEmpty(actions: ViewActions): ViewHost {
       // A new line each time the view is opened, not on every re-render.
       if (State.view !== "empty" || performance.now() - shownAt < 4000) return;
       shownAt = performance.now();
+      // An occasion beats the clock; otherwise a time-of-day greeting, by name if we know it.
+      const occ = occasionFor();
+      const name = profileStore.read().name.trim();
+      if (occ) {
+        title.textContent = occ.title;
+        sub.textContent = occ.greeting;
+        // Persian runs right to left, but lines up under the title.
+        sub.dir = "rtl";
+        sub.style.textAlign = "left";
+        return;
+      }
+      sub.dir = "auto";
+      sub.style.textAlign = "";
       const g = greetingFor();
-      title.textContent = g.title;
+      title.textContent = name ? g.title.replace(/^(Good \w+|Lunch o'clock|Burning the midnight oil)/, `$1, ${name}`) : g.title;
       sub.textContent = g.lines[Math.floor(Math.random() * g.lines.length)];
     },
   };

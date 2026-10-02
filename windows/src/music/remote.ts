@@ -6,7 +6,7 @@
 // player instead and everything works the same way.
 
 import { IS_TAURI, broadcast, onEvent } from "../core/bridge";
-import type { MusicReason, MusicState } from "./engine";
+import type { JingleKind, MusicReason, MusicState } from "./engine";
 import { startMusicHost, type MusicBeat, type MusicCommand } from "./host";
 import type { StationId } from "./stations";
 
@@ -50,7 +50,7 @@ class MusicRemote {
     this.send({ action: "stop", reason });
   }
 
-  jingle(kind: "finish" | "error") {
+  jingle(kind: JingleKind) {
     this.send({ action: "jingle", kind });
   }
 

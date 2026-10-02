@@ -13,6 +13,7 @@ import { emitLocal } from "../core/bridge";
 import type { BotEmoteName, BotStateName, IslandViewName } from "../core/layout";
 import { State } from "../core/state";
 import { awardXp, growthStore, randomOutfit } from "../mochi/growth";
+import { OCCASIONS, occasionOverride, type OccasionId } from "../mochi/occasions";
 import type { Island } from "../island/island";
 
 const CWD = "C:\\code\\my-assistance";
@@ -190,6 +191,10 @@ export function mountPlayground(island: Island) {
       ["Random outfit", () => growthStore.write({ equipped: randomOutfit() })],
       ["Reset growth", () => growthStore.write({ xp: 0, equipped: { hat: "sprout" }, rewarded: [], log: [], celebratedLevel: 1 })],
     ], "Outfits and level-ups are shared with the Hub (open hub.html in another tab)."),
+    group("Occasions", [
+      ...(Object.keys(OCCASIONS) as OccasionId[]).map((id): [string, () => void] => [`${OCCASIONS[id].emoji} ${id}`, () => occasionOverride.write({ id })]),
+      ["Normal day", () => occasionOverride.write({ id: null })],
+    ], "Pretend today is an occasion — the island, the Hub and Settings all follow."),
     group("Integrations", [
       ["Vercel ✓", () => integration("integration_vercel", true)],
       ["Vercel ✗", () => integration("integration_vercel", false)],

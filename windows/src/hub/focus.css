@@ -60,6 +60,44 @@
 .fx-date { color: #b8adff; }
 .fx-greet { margin: 3px 0 2px; font-size: 21px; font-weight: 700; letter-spacing: -.03em; background: linear-gradient(90deg, #fff, #d9d2ff); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .fx-greet-sub { margin: 0; color: #a3a8b5; font-size: 12.5px; line-height: 1.4; }
+.fx-greet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.2; }
+.fx-greet-sub:has(.fx-celebrate) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; }
+.fx-greet-name { padding-inline-end: 2px; }
+.fx-greet-emoji { -webkit-text-fill-color: initial; font-size: .9em; }
+.fx-greet-fa { font-family: "Vazirmatn", Tahoma, var(--font); font-size: 13.5px; font-weight: 600; color: #e9e3ff; }
+
+/* Today is an occasion: the hero takes its colours. */
+.fx-celebrate {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--o0, #a594ff) 45%, transparent);
+  border-radius: 999px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--o0, #a594ff) 26%, transparent), color-mix(in srgb, var(--o1, #ff8fb8) 22%, transparent));
+  color: #fff;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--o0, #a594ff) 40%, transparent);
+  animation: fx-celebrate-pulse 2.6s ease-in-out infinite;
+  transition: transform .2s var(--ease-spring), filter .15s;
+}
+.fx-celebrate:hover { transform: translateY(-1px) scale(1.04); filter: brightness(1.15); }
+.fx-celebrate:focus-visible { outline: 2px solid var(--o0, #a594ff); outline-offset: 2px; }
+.fx-hero[data-occasion]:not([data-occasion=""]) {
+  border-color: color-mix(in srgb, var(--o0) 32%, transparent);
+  background:
+    radial-gradient(420px 180px at 8% 0%, color-mix(in srgb, var(--o0) 26%, transparent), transparent 70%),
+    radial-gradient(360px 200px at 100% 120%, color-mix(in srgb, var(--o1) 18%, transparent), transparent 70%),
+    linear-gradient(135deg, #1a1a26, #14151b 70%);
+}
+.fx-hero[data-occasion]:not([data-occasion=""]) .fx-greet { background-image: linear-gradient(90deg, #fff, color-mix(in srgb, var(--o0) 55%, #fff)); }
+.fx-hero[data-occasion]:not([data-occasion=""]) .fx-date { color: color-mix(in srgb, var(--o0) 70%, #fff); }
+@keyframes fx-celebrate-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--o0, #a594ff) 0%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--o0, #a594ff) 16%, transparent); }
+}
 
 .fx-hero-stats { position: relative; z-index: 1; display: flex; align-items: stretch; gap: 8px; }
 

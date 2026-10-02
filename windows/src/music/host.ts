@@ -10,7 +10,7 @@
 
 import { broadcast, onEvent } from "../core/bridge";
 import type { BotStateName } from "../core/layout";
-import { MusicEngine, type MusicReason, type MusicState } from "./engine";
+import { MusicEngine, type JingleKind, type MusicReason, type MusicState } from "./engine";
 import { onMusicPrefs, readMusicPrefs, type MusicPrefs } from "./prefs";
 import { WORK_PICKS, type StationId } from "./stations";
 
@@ -19,7 +19,7 @@ export type MusicCommand =
   | { action: "toggle"; station?: StationId; reason: MusicReason }
   /** With a reason, only stops music that was started for that reason. */
   | { action: "stop"; reason?: MusicReason }
-  | { action: "jingle"; kind: "finish" | "error" }
+  | { action: "jingle"; kind: JingleKind }
   | { action: "hello" };
 
 export interface MusicBeat {
@@ -78,7 +78,8 @@ export class MusicHost {
         if (!cmd.reason || cmd.reason === this.engine.reason) this.engine.stop();
         break;
       case "jingle":
-        if (this.prefs.jingles) this.engine.jingle(cmd.kind);
+        // A birthday song is asked for on purpose, so it plays even with jingles off.
+        if (this.prefs.jingles || cmd.kind === "birthday") this.engine.jingle(cmd.kind);
         break;
       case "hello":
         broadcast("music-state", this.engine.state);

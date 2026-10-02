@@ -11,7 +11,7 @@ import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
 import { music } from "../music/remote";
 import { stationById } from "../music/stations";
-import { growthStore, wornOutfit } from "./growth";
+import { currentLook, onLookChange } from "./occasions";
 
 export interface PortraitOptions {
   /** Canvas size in CSS pixels; the body is about 70 % of it. */
@@ -89,8 +89,8 @@ export function createPortrait(opts: PortraitOptions): Portrait {
   let detach: (() => void)[] = [];
   const attach = () => {
     if ((opts.outfit ?? "worn") === "worn") {
-      engine.outfit = wornOutfit();
-      detach.push(growthStore.subscribe((s) => { engine.outfit = wornOutfit(s); }));
+      engine.outfit = currentLook();
+      detach.push(onLookChange((look) => { engine.outfit = look; }));
     }
     if (opts.dance) {
       detach.push(music.onState(applyMusic));

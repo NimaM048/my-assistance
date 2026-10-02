@@ -61,7 +61,9 @@ interface BotStateCfg {
 
 export type ParticleType =
   | "heart" | "star" | "spark" | "sweat" | "z"
-  | "confetti" | "note" | "sparkle" | "anger" | "puff" | "qmark";
+  | "confetti" | "note" | "sparkle" | "anger" | "puff" | "qmark"
+  // Occasions: blossom petals (Nowruz), pomegranate seeds (Yalda), embers (Chaharshanbe Suri).
+  | "petal" | "seed" | "ember";
 
 interface Particle {
   type: ParticleType;
@@ -694,6 +696,30 @@ export class BotEngine {
   }
 
   emit(type: Particle["type"], count: number) {
+    if (type === "petal" || type === "seed") {
+      // They drift down past Mochi from above, swaying.
+      for (let i = 0; i < count; i++) {
+        this.particles.push({
+          type, x: (Math.random() - 0.5) * 2.4, y: -1.6 - Math.random() * 0.4,
+          vx: (Math.random() - 0.5) * 0.3, vy: 0.35 + Math.random() * 0.25,
+          age: -i * 0.18, life: 3 + Math.random() * 1.5, rot: Math.random() * Math.PI * 2, size: 0.1 + Math.random() * 0.06,
+          spin: (Math.random() - 0.5) * 3,
+          color: type === "petal" ? (Math.random() < 0.5 ? "#ffb3c7" : "#ffd6e2") : (Math.random() < 0.7 ? "#e8384f" : "#ff6b81"),
+        });
+      }
+      return;
+    }
+    if (type === "ember") {
+      for (let i = 0; i < count; i++) {
+        this.particles.push({
+          // Either side of Mochi, so the sparks rise past it rather than over its face.
+          type, x: (Math.random() < 0.5 ? -1 : 1) * (0.95 + Math.random() * 0.55), y: 0.9,
+          vx: (Math.random() - 0.5) * 0.3, vy: -(0.6 + Math.random() * 0.6),
+          age: -i * 0.1, life: 1.2 + Math.random() * 0.8, rot: Math.random() * 6, size: 0.06 + Math.random() * 0.05,
+        });
+      }
+      return;
+    }
     if (type === "puff") {
       for (let i = 0; i < count; i++) {
         this.particles.push({
@@ -1629,12 +1655,12 @@ export class BotEngine {
       const k = p.age / p.life;
       let a = k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8;
       // Confetti stays bright and only fades at the very end of its fall.
-      if (p.type === "confetti") a = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
+      if (p.type === "confetti" || p.type === "petal" || p.type === "seed") a = k < 0.1 ? k / 0.1 : k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
       if (p.type === "anger" || p.type === "qmark") a = k < 0.12 ? k / 0.12 : k > 0.8 ? (1 - k) / 0.2 : 1;
       const fall = p.g ? 0.5 * p.g * p.age * p.age : 0;
       const px = cx + (p.x + p.vx * p.age) * R * 1.3;
       const py = cy + (p.y + p.vy * p.age + fall) * R * 1.3;
-      const sz = R * p.size * (p.type === "confetti" ? 1 : 1 + k * 0.4);
+      const sz = R * p.size * (p.type === "confetti" || p.type === "petal" || p.type === "seed" ? 1 : 1 + k * 0.4);
 
       x.save();
       x.translate(px, py);
@@ -1733,6 +1759,41 @@ export class BotEngine {
           x.arc(0, 0, sz * (0.6 + k * 1.2), 0, Math.PI * 2);
           x.fill();
           break;
+        case "petal": {
+          x.rotate(p.rot + (p.spin ?? 0) * p.age);
+          x.translate(Math.sin(p.age * 2.5 + p.rot) * sz * 2, 0);
+          x.scale(1, 0.55 + 0.45 * Math.sin(p.age * 4 + p.rot));
+          x.fillStyle = p.color ?? "#ffb3c7";
+          x.beginPath();
+          x.ellipse(0, 0, sz, sz * 0.6, 0, 0, Math.PI * 2);
+          x.fill();
+          break;
+        }
+        case "seed": {
+          x.rotate(p.rot + (p.spin ?? 0) * p.age * 0.3);
+          x.fillStyle = p.color ?? "#e8384f";
+          x.beginPath();
+          x.moveTo(0, -sz);
+          x.quadraticCurveTo(sz * 0.8, 0, 0, sz * 0.8);
+          x.quadraticCurveTo(-sz * 0.8, 0, 0, -sz);
+          x.fill();
+          x.fillStyle = "rgba(255,255,255,.5)";
+          x.beginPath();
+          x.arc(-sz * 0.2, -sz * 0.2, sz * 0.18, 0, Math.PI * 2);
+          x.fill();
+          break;
+        }
+        case "ember": {
+          const glow = x.createRadialGradient(0, 0, 0, 0, 0, sz * 2);
+          glow.addColorStop(0, "rgba(255,230,140,1)");
+          glow.addColorStop(0.4, "rgba(255,140,60,.8)");
+          glow.addColorStop(1, "rgba(255,80,40,0)");
+          x.fillStyle = glow;
+          x.beginPath();
+          x.arc(Math.sin(p.age * 8 + p.rot) * sz, 0, sz * 2, 0, Math.PI * 2);
+          x.fill();
+          break;
+        }
         case "qmark":
           x.translate(0, Math.sin(p.age * 6) * sz * 0.12);
           x.rotate(0.18);

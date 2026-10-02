@@ -12,6 +12,8 @@ import { mochiPortrait } from "../mochi/portrait";
 import { music } from "../music/remote";
 import { readMusicPrefs, writeMusicPrefs } from "../music/prefs";
 import { STATIONS, type StationId } from "../music/stations";
+import { PERSIAN_MONTHS, PERSIAN_MONTHS_FA, profileStore } from "../core/profile";
+import { persianDate, upcomingOccasions } from "../mochi/occasions";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -517,6 +519,68 @@ function musicSection(): HTMLElement {
   );
 }
 
+// ── About you ─────────────────────────────────────────────────────────────────
+
+function aboutSection(): HTMLElement {
+  const profile = profileStore.read();
+  const name = h("input", { type: "text", maxlength: "40", placeholder: "What should Mochi call you?", value: profile.name, "aria-label": "Your name", class: "name-input" }) as HTMLInputElement;
+  name.addEventListener("input", () => { profileStore.write({ name: name.value }); paintSummary(); });
+
+  const month = h("select", { "aria-label": "Birthday month" }) as HTMLSelectElement;
+  month.append(h("option", { value: "", text: "Month" }));
+  PERSIAN_MONTHS.forEach((m, i) => month.append(h("option", { value: String(i + 1), text: `${m} · ${PERSIAN_MONTHS_FA[i]}` })));
+  const day = h("select", { "aria-label": "Birthday day", class: "day-select" }) as HTMLSelectElement;
+  const fillDays = () => {
+    const m = Number(month.value);
+    // Farvardin–Shahrivar have 31 days, Mehr–Esfand 30 (Esfand 30 only in leap years).
+    const count = !m || m <= 6 ? 31 : 30;
+    const keep = day.value;
+    clear(day);
+    day.append(h("option", { value: "", text: "Day" }));
+    for (let d = 1; d <= count; d++) day.append(h("option", { value: String(d), text: String(d) }));
+    day.value = Number(keep) <= count ? keep : "";
+  };
+  if (profile.birthday) month.value = String(profile.birthday.month);
+  fillDays();
+  if (profile.birthday) day.value = String(profile.birthday.day);
+  const saveBirthday = () => {
+    fillDays();
+    profileStore.write({ birthday: month.value && day.value ? { month: Number(month.value), day: Number(day.value) } : null });
+    paintSummary();
+  };
+  month.addEventListener("change", saveBirthday);
+  day.addEventListener("change", saveBirthday);
+
+  const summary = h("div", { class: "about-upcoming" });
+  function paintSummary() {
+    clear(summary);
+    const today = persianDate(new Date());
+    const p = profileStore.read();
+    const chips = upcomingOccasions(new Date(), 4).map(({ occasion, days }) =>
+      h("span", { class: `occ-chip${occasion.id === "birthday" ? " bday" : ""}`, style: `--o0:${occasion.colors[0]};--o1:${occasion.colors[1]}`, title: occasion.greeting },
+        h("span", { "aria-hidden": "true", text: occasion.emoji }),
+        h("b", { text: occasion.id === "birthday" ? "Your birthday" : occasion.title.replace(/^Happy |!$/g, "").replace(/ night$/, "") }),
+        h("small", { text: days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days` }),
+      ));
+    summary.append(
+      h("small", { class: "about-today", text: `Today is ${today.day} ${PERSIAN_MONTHS[today.month - 1]} ${today.year}${p.name.trim() ? ` — hi, ${p.name.trim()}!` : ""}` }),
+      h("div", { class: "occ-chips" }, ...chips),
+    );
+  }
+  paintSummary();
+
+  return h(
+    "section",
+    { class: "card" },
+    cardHead(ICONS.user, "About you", "So Mochi can greet you by name and dress up for Nowruz, Yalda and your birthday.", badge("On this PC", "ok")),
+    h("div", { class: "prefs" },
+      pref("Your name", "Mochi says it in the island and the Hub.", name),
+      pref("Birthday", "In the Persian calendar. Mochi throws you a little party.", month, day),
+    ),
+    summary,
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -546,6 +610,7 @@ async function main() {
       ),
     ),
     claudeSection(status),
+    aboutSection(),
     codexChatSection(),
     integrationsSection(present),
     musicSection(),

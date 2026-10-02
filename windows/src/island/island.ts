@@ -16,7 +16,8 @@ import { Greeting } from "../mochi/greeting";
 import { createMiniBot, pruneMiniBots, setMiniGroove, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 import type { MusicHost } from "../music/host";
 import { stationById } from "../music/stations";
-import { ITEMS, growthStore, levelInfo, wornOutfit } from "../mochi/growth";
+import { ITEMS, growthStore, levelInfo } from "../mochi/growth";
+import { currentLook, occasionFor, onLookChange } from "../mochi/occasions";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -344,6 +345,17 @@ export class Island {
     const calm = State.effectiveState === "idle" && State.stateOverride == null;
     const busyView = State.view === "greeting" || this.uploadActive || State.fileDragOver;
     if (!calm || busyView || this.engine.emoting || this.botHovering) return;
+    // On an occasion, Mochi sometimes celebrates instead of fidgeting.
+    // The occasion may have started or ended since the last look (midnight).
+    this.engine.outfit = currentLook();
+    const occ = occasionFor();
+    if (occ && Math.random() < 0.4) {
+      if (occ.particle === "confetti") this.engine.burst("confetti", 14);
+      else this.engine.emit(occ.particle, occ.particle === "ember" ? 10 : 8);
+      this.engine.triggerEmote(Math.random() < 0.5 ? "dance" : "happy");
+      this.ensureRunning();
+      return;
+    }
     this.engine.triggerEmote(pickFidget(new Date().getHours()));
     this.ensureRunning();
   }
@@ -356,9 +368,9 @@ export class Island {
    */
   private wireGrowth() {
     let level = levelInfo(growthStore.read().xp).level;
-    this.engine.outfit = wornOutfit();
+    this.engine.outfit = currentLook();
+    onLookChange((look) => { this.engine.outfit = look; });
     growthStore.subscribe((s) => {
-      this.engine.outfit = wornOutfit(s);
       const now = levelInfo(s.xp).level;
       if (now > level) {
         const unlocked = unlockedBetween(level, now);
@@ -384,6 +396,19 @@ export class Island {
    */
   attachMusic(host: MusicHost) {
     this.music = host;
+    // Your birthday: Mochi sings for you once, the first time it is on screen.
+    const occ = occasionFor();
+    const sungKey = "coucou.birthday.sung";
+    if (occ?.id === "birthday" && localStorage.getItem(sungKey) !== String(new Date().getFullYear())) {
+      const sing = () => {
+        if (State.mode === "hidden") return false;
+        localStorage.setItem(sungKey, String(new Date().getFullYear()));
+        host.command({ action: "jingle", kind: "birthday" });
+        this.engine.burst("confetti", 24);
+        return true;
+      };
+      const timer = window.setInterval(() => { if (sing()) window.clearInterval(timer); }, 2000);
+    }
     host.engine.subscribe((e) => {
       if (e.type === "state") {
         const { playing, station, ducked } = e.state;
@@ -397,7 +422,7 @@ export class Island {
       } else if (e.type === "beat") {
         this.onBeat(e.bar, e.downbeat);
       } else if (e.type === "jingle") {
-        this.engine.triggerEmote(e.kind === "finish" ? "celebrate" : "pout");
+        this.engine.triggerEmote(e.kind === "error" ? "pout" : "celebrate");
         this.ensureRunning();
       }
     });

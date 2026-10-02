@@ -2,6 +2,7 @@ import "./hub.css";
 import "./focus.css";
 import "./radio.css";
 import "./wardrobe.css";
+import "./occasion.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
@@ -11,6 +12,9 @@ import type { FocusData, FocusTask } from "./types";
 import { nowPlayingCard, renderRadioPage } from "./radio";
 import { renderWardrobePage, watchLevelUps, xpPop, type WardrobeHost } from "./wardrobe";
 import { growthStore, randomOutfit } from "../mochi/growth";
+import { occasionFor, occasionOverride, persianDate } from "../mochi/occasions";
+import { profileStore } from "../core/profile";
+import { openOccasion } from "./occasion";
 import { music } from "../music/remote";
 import { STATIONS } from "../music/stations";
 
@@ -109,6 +113,19 @@ const FA_COPY: Record<string, string> = {
   "Play Mochi Radio": "پخش رادیو موچی", "A random station, composed live · Ctrl Shift M": "یک ایستگاه تصادفی، زنده ساخته‌شده · Ctrl Shift M",
   "Mochi takes the headphones off · Ctrl Shift M": "موچی هدفونش را برمی‌دارد · Ctrl Shift M",
   // Mochi's wardrobe (src/hub/wardrobe.ts, src/mochi/growth.ts)
+  // Persian occasions (src/mochi/occasions.ts, src/hub/occasion.ts)
+  "Happy Nowruz!": "نوروز مبارک!", "Happy Sizdah Bedar!": "سیزده‌به‌در مبارک!", "Chaharshanbe Suri": "چهارشنبه‌سوری", "Happy Yalda night!": "شب یلدا مبارک!", "Happy birthday!": "جشن تولد",
+  "Mochi set the haft-sin for you — come and see.": "موچی برایت سفرهٔ هفت‌سین چیده — بیا ببین.", "Out to nature! Tie a knot in the sabzeh with Mochi.": "بزن بریم دل طبیعت! با موچی سبزه گره بزن.", "The fire is lit — jump over it with Mochi.": "آتش روشن است — با موچی از رویش بپر.", "The longest night — Mochi has a Hafez fortune for you.": "بلندترین شب سال — موچی برایت فال حافظ دارد.", "Mochi baked you a cake. Make a wish!": "موچی برایت کیک پخته. آرزو کن!",
+  "Celebrate": "جشن بگیر", "MOCHI CELEBRATES": "موچی جشن گرفته",
+  "Hover the spread — every item on the haft-sin wishes you something.": "روی سفره بچرخ — هر سینِ هفت‌سین آرزویی برایت دارد.",
+  "Sabzeh": "سبزه", "Sib": "سیب", "Sekkeh": "سکه", "Sir": "سیر", "Sonbol": "سنبل", "Serkeh": "سرکه", "Senjed": "سنجد", "Somaq": "سماق", "Samanu": "سمنو", "Goldfish": "ماهی قرمز", "Mirror": "آینه", "Eggs": "تخم‌مرغ رنگی",
+  "Rebirth and growth": "رویش و زندگی دوباره", "Health and beauty": "تندرستی و زیبایی", "Prosperity": "برکت و فراوانی", "Good health": "سلامتی", "The arrival of spring": "آمدن بهار", "Patience and age": "صبر و پختگی", "Love": "عشق", "The colour of sunrise": "رنگ طلوع خورشید", "Sweetness and plenty": "شیرینی و برکت", "Life": "زندگی", "Reflection on the year": "نگاهی دوباره به سالی که گذشت", "Fertility": "باروری و آفرینش",
+  "Make a wish for the new year": "برای سال نو آرزو کن",
+  "Tie a knot in the sabzeh": "به سبزه گره بزن", "wish tied": "آرزو گره خورد", "wishes tied": "آرزو گره خورد",
+  "Tie a knot in the sabzeh and make a wish — then let it go with the river.": "سبزه را گره بزن و آرزو کن — بعد بسپارش به آب روان.",
+  "Jump over the fire: give it your paleness, take its warmth.": "از روی آتش بپر: زردی‌ات را بده، سرخی‌اش را بگیر.", "Jump! 🔥": "بپر! 🔥",
+  "Make a wish, then open a Hafez fortune": "نیت کن و فال حافظ بگیر", "The longest night of the year — pomegranates, watermelon and a little Hafez.": "بلندترین شب سال — انار، هندوانه و کمی حافظ.",
+  "Make a wish and blow out the candles 🕯️": "آرزو کن و شمع‌ها را فوت کن 🕯️", "Blow out the candles": "شمع‌ها را فوت کن",
   "Mochi's wardrobe": "کمد لباس موچی", "Mochi grows as you work. Level up and dress it your way.": "موچی همراه کار تو بزرگ می‌شود. لِوِل بگیر و هر جور دوست داری لباسش را عوض کن.", "Surprise outfit": "لباس غافلگیرانه", "Take it all off": "همه را دربیاور", "Level": "لِوِل", "XP": "امتیاز", "total": "مجموع", "Next unlock": "باز شدن بعدی", "level": "لِوِل", "Everything unlocked — Mochi is a legend ✨": "همه‌چیز باز شده — موچی یک افسانه است ✨", "Everything": "همه", "Hats": "کلاه‌ها", "Glasses": "عینک‌ها", "Scarves & ties": "شال و پاپیون", "Headphones": "هدفون‌ها", "WARDROBE": "کمد لباس", "Dress Mochi up": "موچی را آماده کن", "Take it off": "درش بیاور", "Wear it": "بپوشانش", "Wear": "پوشیدن", "Wearing": "پوشیده", "Unlocks at a higher level": "در لِوِل بالاتر باز می‌شود", "HOW MOCHI GROWS": "موچی چطور بزرگ می‌شود", "Finish a task": "تمام کردن یک تسک", "High-priority task": "تسک با اولویت بالا", "Focus session (per minute)": "جلسهٔ تمرکز (هر دقیقه)", "Clear today's list": "تمام کردن همهٔ تسک‌های امروز", "Streak of 3, 7, 14, 30 days": "۳، ۷، ۱۴ و ۳۰ روز پیاپی", "Agent session finished": "تمام شدن یک سشن ایجنت", "RECENT XP": "امتیازهای اخیر", "Finish a task or a focus session and Mochi's first XP shows up here.": "یک تسک یا جلسهٔ تمرکز را تمام کن تا اولین امتیاز موچی اینجا بیاید.", "Task finished": "تسک تمام شد", "Cleared today's list": "همهٔ تسک‌های امروز تمام شد", "Streak milestone": "رکورد روزهای پیاپی", "Agent session done": "سشن ایجنت تمام شد", "Break game": "بازی زمان استراحت", "Took a care break": "یک استراحت مراقبتی", "LEVEL UP": "لِوِل جدید", "Mochi reached level": "موچی رسید به لِوِل", "New things in the wardrobe:": "چیزهای تازه در کمد لباس:", "Keep going — new outfits are on the way.": "ادامه بده — لباس‌های تازه در راه‌اند.", "Later": "بعداً", "Open the wardrobe": "باز کردن کمد لباس", "Level up": "لِوِل جدید", "Little sprout": "جوانهٔ کوچولو", "Party hat": "کلاه جشن", "Round glasses": "عینک گرد", "Cozy beanie": "کلاه بافتنی", "Red scarf": "شال‌گردن قرمز", "Pink bow": "پاپیون صورتی", "Bow tie": "پاپیون", "Flower crown": "تاج گل", "Midnight headphones": "هدفون نیمه‌شب", "Sunglasses": "عینک آفتابی", "Cat ears": "گوش گربه", "Mint headphones": "هدفون نعنایی", "Heart cheeks": "گونه‌های قلبی", "Bandana": "دستمال‌گردن", "Star shades": "عینک ستاره‌ای", "Gold headphones": "هدفون طلایی", "Royal crown": "تاج پادشاهی", "Pearl necklace": "گردنبند مروارید", "Monocle": "عینک تک‌چشمی", "Wizard hat": "کلاه جادوگر", "Rainbow headphones": "هدفون رنگین‌کمانی",
 };
 Object.assign(FA_COPY, {
@@ -1098,6 +1115,28 @@ const wardrobeHost: WardrobeHost = {
 };
 watchLevelUps(wardrobeHost, () => setPage("wardrobe"));
 
+/** On an occasion, Mochi opens the celebration the first time you look at the Hub (once a year). */
+function maybeCelebrate() {
+  if (document.hidden) return;
+  const occ = occasionFor();
+  if (!occ) return;
+  const key = `coucou.occasion.seen.${occ.id}`;
+  const year = String(persianDate(new Date()).year);
+  try {
+    if (localStorage.getItem(key) === year) return;
+    localStorage.setItem(key, year);
+  } catch { /* storage off: still celebrate */ }
+  // Let the page settle (and a level-up card go first).
+  window.setTimeout(() => { if (!document.querySelector(".levelup-overlay")) openOccasion(occ, { confetti: popConfetti, toast }); }, 900);
+}
+function celebrateNow() {
+  const occ = occasionFor();
+  if (occ) openOccasion(occ, { confetti: popConfetti, toast });
+}
+// Your name, your birthday or (in development) a pretend occasion changed: redraw the greeting.
+profileStore.subscribe(() => refreshFocusPage());
+if (import.meta.env.DEV) occasionOverride.subscribe(() => { refreshFocusPage(); document.querySelector(".occ-overlay")?.remove(); celebrateNow(); });
+
 /** "just now", "5m", "3h", "2d" — for the XP log. */
 function timeAgoShort(at: number): string {
   const s = (Date.now() - at) / 1000;
@@ -1208,6 +1247,7 @@ function openCommandPalette() {
       music.state.playing
         ? { title: "Stop the music", detail: "Mochi takes the headphones off · Ctrl Shift M", icon: ICONS.speakerOff, run: () => music.stop() }
         : { title: "Play Mochi Radio", detail: "A random station, composed live · Ctrl Shift M", icon: ICONS.music, run: surpriseStation },
+      ...(() => { const occ = occasionFor(); return occ ? [{ title: occ.title, detail: occ.invite, icon: ICONS.star, run: celebrateNow }] : []; })(),
       ...STATIONS.map((st): HubCommand => ({ title: st.name, detail: st.tagline, icon: ICONS.music, run: () => music.play(st.id, "manual") })),
       { title: "Refresh repositories", detail: "Fetch the latest repository details", icon: ICONS.refresh, run: () => { setPage("repositories"); void loadRepos(); } },
       { title: "Refresh work queue", detail: "Sync your assigned GitHub work", icon: ICONS.refresh, run: () => { if (page !== "queue") setPage("queue"); else void loadQueue(); } },
@@ -1398,8 +1438,10 @@ document.addEventListener("visibilitychange", () => {
     processSnoozedNotifications();
     processPlanReminders();
     tickFocus();
+    maybeCelebrate();
   }
 });
+maybeCelebrate();
 
 document.addEventListener("keydown", (event) => {
   if (page === "focus" && focusKeydown(event)) {

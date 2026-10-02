@@ -94,12 +94,16 @@ export function buildHeader(actions: ViewActions): ViewHost {
     actions.setView(v);
   }
 
+  // One highlight that glides between tabs instead of four that blink on and off.
+  const indicator = h("i", { class: "tab-indicator", "aria-hidden": "true" });
+  const tabs = [tabHome, tabProject, tabChat, tabDrop];
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabProject, tabChat, tabDrop),
+    h("div", { class: "tabs", role: "tablist" }, indicator, ...tabs),
     h("div", { class: "header-actions" }, hubBtn, gearBtn, soundBtn),
   );
+  for (const t of tabs) t.setAttribute("role", "tab");
 
   return {
     el,
@@ -109,6 +113,14 @@ export function buildHeader(actions: ViewActions): ViewHost {
       tabProject.classList.toggle("on", v === "project");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
+      const active = tabs.find((t) => t.classList.contains("on"));
+      for (const t of tabs) t.setAttribute("aria-selected", String(t === active));
+      if (active) {
+        indicator.style.transform = `translateX(${active.offsetLeft - tabs[0].offsetLeft}px)`;
+        indicator.style.opacity = "1";
+      } else {
+        indicator.style.opacity = "0";
+      }
       gearBtn.classList.toggle("on", v === "settings");
       clear(gearBtn);
       gearBtn.append(svg(v === "settings" ? ICONS.gearFill : ICONS.gear, 14));
@@ -195,9 +207,12 @@ function buildOverview(actions: ViewActions): ViewHost {
           cardKey = "";
         }
         clear(who);
+        const live = dot(task.color, 7);
+        live.classList.add("live-dot");
+        if (task.state === "working" || task.state === "thinking" || task.state === "searching") live.classList.add("busy");
         who.append(
-          dot(task.color, 7),
-          h("span", { class: "name", text: task.name }),
+          live,
+          h("span", { class: "name", text: task.name, title: task.name }),
           h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : task.source === "codex" ? "Codex" : "n8n" }),
         );
         const statusLabels: Record<string, string> = {
@@ -210,7 +225,7 @@ function buildOverview(actions: ViewActions): ViewHost {
         if (task.steps.length > 1) {
           who.append(h("span", {
             class: "count",
-            text: `${Math.min(task.stepIndex + 1, task.steps.length)} / ${task.steps.length}`,
+            text: `${Math.min(task.stepIndex + 1, task.steps.length)}/${task.steps.length}`,
             title: `Step ${Math.min(task.stepIndex + 1, task.steps.length)} of ${task.steps.length}`,
           }));
         }
@@ -295,20 +310,69 @@ function lighten(hex: string, amount: number): string {
 
 // ── Empty ─────────────────────────────────────────────────────────────────────
 
+/** A greeting that follows the clock, so Mochi feels like it shares your day. */
+export function greetingFor(date = new Date()): { title: string; lines: string[] } {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) {
+    return { title: "Good morning ☀️", lines: [
+      "Fresh start — what are we building today?",
+      "Coffee first, then Claude Code?",
+      "I stretched already. Your turn!",
+    ] };
+  }
+  if (hour >= 12 && hour < 14) {
+    return { title: "Lunch o'clock 🍜", lines: [
+      "Don't forget to eat something nice.",
+      "A short walk does wonders for bugs.",
+      "I'll keep an eye on things while you're away.",
+    ] };
+  }
+  if (hour >= 14 && hour < 18) {
+    return { title: "Good afternoon 🌤", lines: [
+      "Nothing running right now. Drop a file or ask me anything.",
+      "Water break? I'll wait right here.",
+      "Ship something small and feel great about it.",
+    ] };
+  }
+  if (hour >= 18 && hour < 23) {
+    return { title: "Good evening 🌙", lines: [
+      "Wrapping up? Save a handoff for tomorrow-you.",
+      "Nothing running. Drop a file or ask me anything.",
+      "Proud of today's work. Really.",
+    ] };
+  }
+  return { title: "Burning the midnight oil 🌌", lines: [
+    "Late-night code is brave code. Remember to rest.",
+    "I'm yawning, but I'm here.",
+    "One more commit, then sleep — deal?",
+  ] };
+}
+
 function buildEmpty(actions: ViewActions): ViewHost {
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub empty-line" });
   const body = h(
     "div",
-    { class: "stack", style: "padding:0 18px 0 118px;flex-direction:row;align-items:center;gap:16px" },
-    h(
-      "div",
-      { style: "display:flex;flex-direction:column;gap:5px" },
-      h("div", { class: "title", text: "Nothing running right now." }),
-      h("div", { class: "sub", text: "Drop a file or window, or ask me anything." }),
-    ),
+    { class: "stack empty-stack" },
+    h("div", { class: "empty-text" }, title, sub),
     h("div", { class: "grow" }),
-    btn("Ask Codex", "primary", () => actions.setView("prompt")),
+    h("div", { class: "actions" },
+      btn("Drop a file", "secondary", () => actions.setView("upload")),
+      btn("Ask Codex", "primary", () => actions.setView("prompt")),
+    ),
   );
-  return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
+  let shownAt = 0;
+  return {
+    el: h("div", { class: "view" }, card("soft", body)),
+    sync() {
+      // A new line each time the view is opened, not on every re-render.
+      if (State.view !== "empty" || performance.now() - shownAt < 4000) return;
+      shownAt = performance.now();
+      const g = greetingFor();
+      title.textContent = g.title;
+      sub.textContent = g.lines[Math.floor(Math.random() * g.lines.length)];
+    },
+  };
 }
 
 // ── Approval ──────────────────────────────────────────────────────────────────
@@ -368,15 +432,25 @@ function buildError(actions: ViewActions): ViewHost {
   const who = h("div");
   const title = h("div", { class: "title", text: "Workflow stopped." });
   const detail = h("div", { class: "detail" });
-  const row = h("div", { class: "actions" },
-    btn("Retry", "primary", () => actions.setView(State.defaultView())),
-    btn("Open in n8n", "secondary", () => actions.openUrl("")),
-  );
+  const row = h("div", { class: "actions" });
   const el = h("div", { class: "view" }, card("red", stack(116, 16, who, title, detail, row)));
+  let rowKey = "";
   return {
     el,
     sync() {
       const task = State.focusTask;
+      // The second button goes where the problem can actually be looked at.
+      const source = task?.source ?? "claudeCode";
+      if (rowKey !== source) {
+        rowKey = source;
+        clear(row);
+        row.append(
+          btn("OK", "primary", () => actions.setView(State.defaultView())),
+          source === "n8n"
+            ? btn("Open in n8n", "secondary", () => void Bridge.openN8n())
+            : btn("Open terminal", "secondary", () => actions.openTerminal()),
+        );
+      }
       clear(who);
       who.append(agentWho(task, task?.source === "n8n" ? "n8n" : task?.source === "codex" ? "Codex" : "Claude Code"));
       title.textContent = task?.source === "n8n" ? "Workflow stopped." : task?.source === "codex" ? "Codex turn stopped on an error." : "Session stopped on an error.";
@@ -420,8 +494,9 @@ function buildConfused(): ViewHost {
 // ── Note ──────────────────────────────────────────────────────────────────────
 
 function buildNote(): ViewHost {
-  const title = h("div", { class: "title" });
-  const el = h("div", { class: "view" }, card(null, h("div", { class: "stack", style: "padding:0 18px 0 98px" }, title)));
+  const title = h("div", { class: "title note-text" });
+  const el = h("div", { class: "view" }, card("soft", h("div", { class: "stack note-stack" },
+    h("span", { class: "note-icon", "aria-hidden": "true" }, svg(ICONS.bell, 13)), title)));
   return {
     el,
     sync() {
@@ -480,6 +555,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       const s = State.settings;
       soundSwitch.classList.toggle("on", s.soundEnabled);
       volume.value = String(s.soundVolume);
+      volume.style.setProperty("--fill", `${(s.soundVolume / 0.2) * 100}%`);
       volume.style.opacity = s.soundEnabled ? "1" : "0.4";
       autoLabel.textContent = `Auto-close · ${Math.round(s.autoCloseInterval)}s`;
       segButtons.forEach((b, i) => b.classList.toggle("on", s.autoCloseInterval === [10, 15, 30][i]));
@@ -616,15 +692,16 @@ function buildProject(actions: ViewActions): ViewHost {
       ));
     }
     const buttons = h("div", { class: "project-actions" });
-    buttons.append(h("button", { class: "project-action hub-open", onclick: () => void Bridge.openHubWindow() }, svg(ICONS.grid, 11), "Open Coucou Hub"));
-    if (cwd) buttons.append(h("button", { class: "project-action subtle", text: "Open in VS Code", onclick: () => void Bridge.openInVSCode(cwd) }));
-    if (cwd && status?.githubRepo) buttons.append(h("button", { class: "project-action subtle", text: "Open GitHub", onclick: () => void Bridge.openUrl(`https://github.com/${status?.githubRepo}`) }));
+    buttons.append(h("button", { class: "project-action hub-open", title: "Open Coucou Hub", onclick: () => void Bridge.openHubWindow() }, svg(ICONS.grid, 11), "Hub"));
+    if (cwd) buttons.append(h("button", { class: "project-action subtle", title: "Open in VS Code", onclick: () => void Bridge.openInVSCode(cwd) }, svg(ICONS.code, 11), "VS Code"));
+    if (cwd && status?.githubRepo) buttons.append(h("button", { class: "project-action subtle", title: "Open on GitHub", onclick: () => void Bridge.openUrl(`https://github.com/${status?.githubRepo}`) }, svg(ICONS.arrowUpRight, 11), "GitHub"));
     if (cwd && status) {
-      buttons.append(h("button", { class: "project-action", text: "Summarize changes", onclick: () => {
+      buttons.append(h("span", { class: "grow" }));
+      buttons.append(h("button", { class: "project-action", text: "Summarize", title: "Summarize changes", onclick: () => {
         State.suggestedPrompt = "Summarize the current project's uncommitted changes. Explain the purpose of each change briefly.";
         actions.setView("prompt");
       } }));
-      buttons.append(h("button", { class: "project-action", text: "Review my diff", onclick: () => {
+      buttons.append(h("button", { class: "project-action", text: "Review diff", title: "Review my diff", onclick: () => {
         State.suggestedPrompt = "Review my current uncommitted Git diff. Look for bugs, regressions, and missing edge cases. Do not modify files.";
         actions.setView("prompt");
       } }));

@@ -69,6 +69,11 @@ async function main() {
   // page wake the island so the visuals can be checked with `npm run dev`.
   if (!IS_TAURI) {
     document.addEventListener("click", () => Sound.resume(), { once: true });
+    // Development only: a control panel to walk through every state and mood.
+    // `import.meta.env.DEV` is false in a build, so this import is dropped.
+    if (import.meta.env.DEV) {
+      void import("./dev/playground").then((m) => m.mountPlayground(island));
+    }
   }
 }
 

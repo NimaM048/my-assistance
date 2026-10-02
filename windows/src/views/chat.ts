@@ -10,15 +10,20 @@ import type { ViewHost } from "./views";
 
 let nextId = 1;
 
-function bubble(message: ChatMessage): HTMLElement {
-  if (message.role === "user") {
-    return h(
-      "div",
-      { class: "chat-row user" },
-      h("div", { class: "bubble", text: message.content }),
-    );
-  }
-  return h("div", { class: "chat-row" }, h("div", { class: "reply", text: message.content }));
+/** Ideas for an empty chat — one click puts them in the field, Enter sends. */
+const SUGGESTIONS = [
+  "Summarize my uncommitted changes",
+  "Write a commit message for this diff",
+  "Explain the last error",
+  "Plan my next three tasks",
+];
+
+function bubble(message: ChatMessage, fresh: boolean): HTMLElement {
+  const row = message.role === "user"
+    ? h("div", { class: "chat-row user" }, h("div", { class: "bubble", dir: "auto", text: message.content }))
+    : h("div", { class: "chat-row" }, h("div", { class: "reply", dir: "auto", text: message.content }));
+  if (fresh) row.classList.add("fresh");
+  return row;
 }
 
 function typingDots(): HTMLElement {
@@ -47,11 +52,23 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   }) as HTMLInputElement;
   const send = h("button", { class: "send-btn", title: "Send" }, svg(ICONS.arrowUp, 11));
   const bar = h("div", { class: "chat-bar" }, input, send);
+  const ideas = h("div", { class: "chat-ideas" },
+    h("div", { class: "chat-ideas-title", text: "Try asking…" }),
+    ...SUGGESTIONS.map((text) => h("button", {
+      class: "idea",
+      text,
+      onclick: () => {
+        input.value = text;
+        input.focus();
+        Sound.play("blip");
+      },
+    })),
+  );
 
   const el = h(
     "div",
     { class: "view" },
-    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, log, bar)),
+    h("div", { class: "card wash chat-card" }, h("div", { class: "chat-body" }, chipRow, ideas, log, bar)),
   );
   (el.querySelector(".card") as HTMLElement).style.setProperty("--wash", "rgba(99,102,241,0.5)");
 
@@ -93,6 +110,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   }
 
   send.addEventListener("click", () => void submit());
+  input.addEventListener("input", () => send.classList.toggle("ready", input.value.trim().length > 0));
   input.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") {
       e.preventDefault();
@@ -120,12 +138,16 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       const thinking = State.stateOverride === "thinking";
       const count = State.chatHistory.length + (thinking ? 0.5 : 0);
       if (count !== renderedCount) {
+        // Only messages that weren't on screen before get the entrance animation.
+        const seen = Math.floor(Math.max(0, renderedCount));
         renderedCount = count;
         clear(log);
-        for (const m of State.chatHistory) log.append(bubble(m));
+        State.chatHistory.forEach((m, i) => log.append(bubble(m, i >= seen)));
         if (thinking) log.append(typingDots());
         log.scrollTop = log.scrollHeight;
       }
+      ideas.style.display = State.chatHistory.length === 0 && !thinking && !State.droppedFile ? "" : "none";
+      send.classList.toggle("ready", input.value.trim().length > 0);
 
       input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
       input.disabled = sending;

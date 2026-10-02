@@ -10,7 +10,29 @@ import type { Settings } from "./state";
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/**
+ * Browser-only stand-in for the Rust commands, so `npm run dev` shows the real
+ * UI with believable data. `import.meta.env.DEV` is false in a production build,
+ * which drops this branch and the mock module from the bundle entirely.
+ * Add `?mock=0` to the URL to see the bare "not running inside Coucou" states.
+ */
+const USE_DEV_MOCK =
+  import.meta.env.DEV && !IS_TAURI &&
+  typeof location !== "undefined" && new URLSearchParams(location.search).get("mock") !== "0";
+
+async function devMock<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { mockCommand } = await import("./devmock");
+  return mockCommand(cmd, args) as Promise<T>;
+}
+
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
+  if (USE_DEV_MOCK) {
+    try {
+      return await devMock<T>(cmd, args);
+    } catch {
+      return null;
+    }
+  }
   if (!IS_TAURI) return null;
   try {
     return await invoke<T>(cmd, args);
@@ -209,6 +231,7 @@ export interface HookPreview {
 
 /** Same as `call`, but surfaces the error so the UI can show what went wrong. */
 async function callOrThrow<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (USE_DEV_MOCK) return devMock<T>(cmd, args);
   if (!IS_TAURI) throw new Error("not running inside Coucou");
   return invoke<T>(cmd, args);
 }
@@ -232,7 +255,24 @@ export async function onDragDrop(handler: (e: DragDropPayload) => void) {
   });
 }
 
+/**
+ * In a plain browser there is no Rust side to emit events, so handlers are kept
+ * here and `emitLocal` can play the part — the dev playground uses it to drive
+ * the island through exactly the code paths a real hook event takes.
+ */
+const localHandlers = new Map<string, Set<(payload: unknown) => void>>();
+
+export function emitLocal(name: string, payload: unknown) {
+  for (const fn of localHandlers.get(name) ?? []) fn(payload);
+}
+
 export async function onEvent<T>(name: string, handler: (payload: T) => void) {
-  if (!IS_TAURI) return () => {};
+  if (!IS_TAURI) {
+    const set = localHandlers.get(name) ?? new Set();
+    const fn = handler as (payload: unknown) => void;
+    set.add(fn);
+    localHandlers.set(name, set);
+    return () => void set.delete(fn);
+  }
   return listen<T>(name, (e) => handler(e.payload));
 }

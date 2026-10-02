@@ -2,6 +2,7 @@ import "./hub.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
+import { mochiPortrait } from "../mochi/portrait";
 
 type Page = "repositories" | "queue" | "music" | "focus" | "activity";
 type Filter = "all" | "public" | "private" | "pinned";
@@ -491,7 +492,10 @@ function processSnoozedNotifications() {
 }
 
 const logo = h("div", { class: "brand" },
-  h("div", { class: "brand-mark", text: "✦" }),
+  h("div", { class: "brand-mark" }, mochiPortrait({
+    size: 46, greet: true, follow: true, idleMoods: ["wink", "lookAround", "hop", "whistle"],
+    clickMoods: ["giggle", "love", "excited", "spin", "shy"], label: "Mochi",
+  })),
   h("div", { class: "brand-copy" }, h("strong", { text: "Coucou Hub" }), h("small", { text: "Your workspace, together" })),
 );
 const repoNav = h("button", { class: "nav-button active", onclick: () => setPage("repositories") }, svg(ICONS.stack, 16), h("span", { text: "Projects" }));
@@ -576,7 +580,37 @@ function setPage(next: Page) {
       : next === "activity" ? "A private, local timeline of your work."
         : "Plan today's work and protect a little time to focus.";
   renderPage();
+  // Each page eases in rather than snapping into place.
+  mainContent.classList.remove("page-in");
+  void mainContent.offsetWidth;
+  mainContent.classList.add("page-in");
   if (enteringQueue) void loadQueue();
+}
+
+/**
+ * A small burst of confetti from an element — the reward for ticking a task off.
+ * Lives on <body>, so the list re-rendering underneath doesn't cut it short.
+ */
+function popConfetti(from: HTMLElement) {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const r = from.getBoundingClientRect();
+  const colors = ["#FF6B6B", "#FFD166", "#06D6A0", "#4CC9F0", "#B794F6", "#FF8FAB"];
+  const layer = h("div", { class: "confetti-layer", "aria-hidden": "true" });
+  layer.style.left = `${r.left + r.width / 2}px`;
+  layer.style.top = `${r.top + r.height / 2}px`;
+  for (let i = 0; i < 16; i++) {
+    const angle = (i / 16) * Math.PI * 2 + Math.random() * 0.4;
+    const dist = 26 + Math.random() * 34;
+    const bit = h("i");
+    bit.style.background = colors[i % colors.length];
+    bit.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+    bit.style.setProperty("--dy", `${Math.sin(angle) * dist - 18}px`);
+    bit.style.setProperty("--rot", `${Math.round(Math.random() * 720 - 360)}deg`);
+    bit.style.animationDelay = `${Math.random() * 60}ms`;
+    layer.append(bit);
+  }
+  document.body.append(layer);
+  window.setTimeout(() => layer.remove(), 1100);
 }
 
 async function loadRepos() {
@@ -649,11 +683,13 @@ function visibleRepos(): GitHubRepository[] {
 function renderRepos() {
   clear(mainContent);
   if (loading && !catalog) {
-    mainContent.append(h("div", { class: "repo-empty", text: "Loading your repositories…" }));
+    mainContent.append(h("div", { class: "repo-empty mochi-empty" },
+      mochiPortrait({ size: 64, state: "searching" }),
+      h("span", { text: "Loading your repositories…" })));
     return;
   }
   if (loadError && !catalog) {
-    mainContent.append(h("div", { class: "repo-error" }, h("b", { text: "GitHub could not be reached" }), h("span", { text: loadError }), h("div", { style: "display:flex;justify-content:center;gap:8px;margin-top:14px" }, h("button", { class: "toolbar-button", text: "Settings", onclick: () => void Bridge.openSettingsWindow() }), h("button", { class: "toolbar-button", text: "Try again", onclick: () => void loadRepos() }))));
+    mainContent.append(h("div", { class: "repo-error" }, mochiPortrait({ size: 64, state: "question", idleMoods: ["curious"] }), h("b", { text: "GitHub could not be reached" }), h("span", { text: loadError }), h("div", { style: "display:flex;justify-content:center;gap:8px;margin-top:14px" }, h("button", { class: "toolbar-button", text: "Settings", onclick: () => void Bridge.openSettingsWindow() }), h("button", { class: "toolbar-button", text: "Try again", onclick: () => void loadRepos() }))));
     return;
   }
   const repos = catalog?.repositories ?? [];
@@ -889,7 +925,7 @@ function renderActivity() {
   const dateLabel = activityDay === today ? "Today" : formatDate(selected, { weekday: "long", month: "long", day: "numeric" });
   const list = h("div", { class: "activity-list" });
   if (!entries.length) {
-    list.append(h("div", { class: "activity-empty" }, h("span", { class: "activity-empty-mark" }, svg(ICONS.clock, 18)), h("b", { text: "A quiet day so far" }), h("span", { text: "Completed focus sessions, tasks and project opens will show up here." })));
+    list.append(h("div", { class: "activity-empty" }, mochiPortrait({ size: 72, state: "sleeping", overhang: 18, label: "Mochi, napping" }), h("b", { text: "A quiet day so far" }), h("span", { text: "Completed focus sessions, tasks and project opens will show up here." })));
   } else {
     for (const entry of entries) {
       list.append(h("article", { class: `activity-item ${entry.kind}` },
@@ -995,14 +1031,15 @@ function renderFocus() {
     const list = focus.tasks.filter((task) => task.kind !== "note" && (!task.doneAt || new Date(task.doneAt).toDateString() === new Date().toDateString()))
       .sort((a, b) => Number(Boolean(a.doneAt)) - Number(Boolean(b.doneAt)) || (a.scheduledFor ?? "9999-12-31").localeCompare(b.scheduledFor ?? "9999-12-31"));
     if (!list.length) {
-      taskList.append(h("div", { class: "focus-empty task-empty" }, h("div", { class: "empty-check", text: "✓" }), h("b", { text: "No tasks yet" }), h("span", { text: "Add a task and make the next step easy." })));
+      taskList.append(h("div", { class: "focus-empty task-empty" }, mochiPortrait({ size: 64, follow: true, idleMoods: ["whistle", "lookAround", "hop", "curious"], clickMoods: ["giggle", "excited"] }), h("b", { text: "No tasks yet" }), h("span", { text: "Add a task and make the next step easy." })));
       return;
     }
     for (const task of list) {
       const done = Boolean(task.doneAt);
       const repo = task.repo ? catalog?.repositories.find((item) => item.fullName === task.repo) : null;
       const row = h("div", { class: `focus-task ${done ? "done" : ""} ${!done && task.scheduledFor && task.scheduledFor < todayKey() ? "overdue" : ""}` });
-      row.append(h("button", { class: `task-check ${done ? "checked" : ""}`, title: done ? "Mark as not done" : "Complete task", onclick: () => {
+      row.append(h("button", { class: `task-check ${done ? "checked" : ""}`, title: done ? "Mark as not done" : "Complete task", onclick: (event: Event) => {
+        if (!done) popConfetti(event.currentTarget as HTMLElement);
         task.doneAt = done ? null : Date.now();
         saveFocus();
         renderFocus();

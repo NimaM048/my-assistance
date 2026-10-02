@@ -338,3 +338,35 @@ html[dir="rtl"] .capture-date-row { flex-wrap: wrap; }
 html[dir="rtl"] .queue-scroll { padding-right: 1px; padding-left: 5px; }.queue-card-title span { direction: ltr; text-align: right; }.queue-updated { align-self: flex-start; text-align: left; }.queue-card-actions { justify-content: flex-start; }
 @media (max-width: 980px) { .queue-toolbar { flex-wrap: wrap; }.queue-filters { order: 2; flex: 1 1 auto; }.queue-toolbar .result-count { order: 3; margin-left: auto; } }
 @media (max-width: 740px) { .queue-list { grid-template-columns: 1fr; }.queue-card { min-height: 130px; }.queue-badges { max-width: 46%; }.queue-toolbar .search-wrap { flex-basis: 100%; }.queue-filters { flex: 1 1 100%; }.queue-toolbar .result-count { display: none; } }
+
+/* ── Mochi & motion ──────────────────────────────────────────────────────────
+   The brand mark and the empty states are a live Mochi (src/mochi/portrait.ts);
+   pages ease in when you switch, and ticking a task off pops a little confetti. */
+
+.brand-mark { width: 46px; height: 46px; margin: -6px -2px -6px -6px; background: none; box-shadow: none; border-radius: 0; overflow: visible; }
+.brand-mark .mochi-portrait { display: block; filter: drop-shadow(0 6px 14px rgba(139,124,255,.28)); }
+
+.mochi-portrait { flex: 0 0 auto; }
+.repo-empty.mochi-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.repo-error .mochi-portrait { margin: 0 auto 4px; display: block; }
+.activity-empty .mochi-portrait, .task-empty .mochi-portrait { margin-bottom: -2px; }
+
+.page-content.page-in { animation: page-in .38s cubic-bezier(.22,1,.36,1) both; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.task-check { transition: transform .25s cubic-bezier(.34,1.56,.64,1), background .15s, border-color .15s; }
+.task-check:hover { transform: scale(1.12); }
+.task-check:active { transform: scale(.88); }
+.task-check.checked { animation: check-pop .4s cubic-bezier(.34,1.56,.64,1) both; }
+@keyframes check-pop { from { transform: scale(.6); } to { transform: scale(1); } }
+
+.confetti-layer { position: fixed; z-index: 9999; width: 0; height: 0; pointer-events: none; }
+.confetti-layer i { position: absolute; left: -3px; top: -4px; width: 6px; height: 8px; border-radius: 1.5px; animation: confetti-pop .9s cubic-bezier(.2,.8,.3,1) both; }
+@keyframes confetti-pop {
+  0% { transform: translate(0, 0) rotate(0) scale(.4); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: translate(var(--dx), calc(var(--dy) + 30px)) rotate(var(--rot)) scale(1); opacity: 0; }
+}
+
+.nav-button svg { transition: transform .3s cubic-bezier(.34,1.56,.64,1); }
+.nav-button:hover svg { transform: scale(1.15) rotate(-6deg); }

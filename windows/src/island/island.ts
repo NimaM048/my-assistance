@@ -11,16 +11,28 @@ import {
 } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
-import { BotEngine, hexToRGB } from "../mochi/engine";
+import { BotEngine, EMOTE_SOUND, hexToRGB, pickFidget } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
 import { h } from "../views/dom";
+import type { BotEmoteName } from "../core/layout";
 import { IslandStateMachine } from "./fsm";
 
 const BOT_OVERHANG = 40;
+/** Room on each side of Mochi's canvas for confetti and notes. */
+const BOT_PAD_X = 64;
+/** Room below Mochi for falling confetti. */
+const BOT_PAD_BOTTOM = 28;
+/** Idle Mochi does something on its own every so often (seconds). */
+const FIDGET_MIN = 7;
+const FIDGET_MAX = 16;
+/** What a hover turns into after a moment — not always the same thing. */
+const HOVER_MOODS: BotEmoteName[] = ["love", "love", "shy", "giggle", "wink", "purr"];
+/** What a single poke turns into. */
+const POKE_MOODS: BotEmoteName[] = ["annoyed", "annoyed", "surprised", "pout"];
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
 const HIT_MARGIN = 14;
 
@@ -31,6 +43,11 @@ const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading"
 const PRE_PROGRESS = USC.T_PROG_START - USC.T_DROP;
 
 const modeOrder = (m: IslandMode) => (m === "hidden" ? 0 : m === "compact" ? 1 : 2);
+
+/** Left-to-right order of the header tabs, so a view slides in from its side. */
+const TAB_ORDER: Partial<Record<IslandViewName, number>> = {
+  overview: 0, empty: 0, project: 1, prompt: 2, upload: 3, settings: 4,
+};
 
 export class Island {
   readonly fsm = new IslandStateMachine();
@@ -46,6 +63,8 @@ export class Island {
   private miniGrid!: HTMLElement;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
+  /** Thin glowing edge under the island, coloured by what Mochi is doing. */
+  private auraEl!: HTMLElement;
 
   private header!: ViewHost;
   private views!: Map<IslandViewName, ViewHost>;
@@ -81,6 +100,15 @@ export class Island {
   private botHoverStart = { x: 0, y: 0 };
 
   private confusedRecovery: number | null = null;
+
+  /** Next idle fidget; only ever armed while the island is on screen. */
+  private fidgetTimer: number | null = null;
+  /** Petting: cursor direction changes while resting on Mochi. */
+  private petLastX = 0;
+  private petDir = 0;
+  private petTurns: number[] = [];
+  private lastPet = 0;
+  private reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
 
@@ -194,12 +222,14 @@ export class Island {
       cancel: () => this.setView(State.defaultView()),
     });
 
+    this.auraEl = h("div", { id: "aura", "aria-hidden": "true" });
     this.clipEl = h(
       "div",
       { id: "island-clip" },
       this.greetingCanvas,
       this.uploadCanvas.el,
       this.contentEl,
+      this.auraEl,
     );
     this.islandEl = h(
       "div",
@@ -275,7 +305,42 @@ export class Island {
     }
     this.updateWindowCollapsed();
     this.animateGeometry(modeOrder(mode) < modeOrder(prev));
+    this.scheduleFidget();
     State.notify();
+  }
+
+  // ── Idle life ───────────────────────────────────────────────────────────────
+
+  /**
+   * Arms the next idle fidget. Timers only exist while the island is visible:
+   * hiding clears them, so a hidden island still costs nothing.
+   */
+  private scheduleFidget() {
+    if (this.fidgetTimer != null) window.clearTimeout(this.fidgetTimer);
+    this.fidgetTimer = null;
+    if (State.mode === "hidden" || this.reducedMotion) return;
+    const delay = FIDGET_MIN + Math.random() * (FIDGET_MAX - FIDGET_MIN);
+    this.fidgetTimer = window.setTimeout(() => {
+      this.fidgetTimer = null;
+      this.fidget();
+      this.scheduleFidget();
+    }, delay * 1000);
+  }
+
+  private fidget() {
+    const calm = State.effectiveState === "idle" && State.stateOverride == null;
+    const busyView = State.view === "greeting" || this.uploadActive || State.fileDragOver;
+    if (!calm || busyView || this.engine.emoting || this.botHovering) return;
+    this.engine.triggerEmote(pickFidget(new Date().getHours()));
+    this.ensureRunning();
+  }
+
+  /** An emote the user caused, with its sound. */
+  react(emote: BotEmoteName) {
+    this.engine.triggerEmote(emote);
+    const sound = EMOTE_SOUND[emote];
+    if (sound && emote !== "annoyed") Sound.play(sound);
+    this.ensureRunning();
   }
 
   /** True while the drop sequence owns the island body. */
@@ -541,6 +606,11 @@ export class Island {
       if (this.isBotHit(e.clientX, e.clientY)) {
         this.cancelBotHover();
         this.engine.slap();
+        // The engine already squashed and said "ouch"; vary the face it pulls.
+        if (State.stateOverride == null && this.engine.state !== "dizzy") {
+          const mood = POKE_MOODS[Math.floor(Math.random() * POKE_MOODS.length)];
+          if (mood !== "annoyed") this.engine.triggerEmote(mood, 0.9);
+        }
       }
     });
 
@@ -592,6 +662,7 @@ export class Island {
     if (overBot && !this.botHovering) this.botHoverIn(x, y);
     if (!overBot && this.botHovering) this.cancelBotHover();
     this.botHovering = overBot;
+    if (overBot) this.trackPetting(x);
     if (this.botHovering) {
       const d = Math.hypot(x - this.botHoverStart.x, y - this.botHoverStart.y);
       if (d > 40) {
@@ -601,6 +672,30 @@ export class Island {
     }
 
     this.ensureRunning();
+  }
+
+  /**
+   * Rubbing the cursor back and forth over Mochi is petting: four direction
+   * changes inside a second and it purrs.
+   */
+  private trackPetting(x: number) {
+    const dx = x - this.petLastX;
+    this.petLastX = x;
+    if (Math.abs(dx) < 3) return;
+    const dir = Math.sign(dx);
+    const t = performance.now();
+    if (this.petDir !== 0 && dir !== this.petDir) {
+      this.petTurns = this.petTurns.filter((s) => t - s < 1000);
+      this.petTurns.push(t);
+      if (this.petTurns.length >= 4 && t - this.lastPet > 2500 && State.stateOverride == null) {
+        this.lastPet = t;
+        this.petTurns = [];
+        if (this.botHoverTimer != null) window.clearTimeout(this.botHoverTimer);
+        this.botHoverTimer = null;
+        this.react("purr");
+      }
+    }
+    this.petDir = dir;
   }
 
   private isBotHit(x: number, y: number): boolean {
@@ -627,8 +722,7 @@ export class Island {
       if (!this.botHovering || State.stateOverride != null) return;
       if (performance.now() / 1000 - this.lastLoveTime < 6) return;
       this.lastLoveTime = performance.now() / 1000;
-      this.engine.triggerEmote("love");
-      Sound.play("love");
+      this.react(HOVER_MOODS[Math.floor(Math.random() * HOVER_MOODS.length)]);
     }, 1900);
   }
 
@@ -718,13 +812,15 @@ export class Island {
     // spends most of its life in. Geometry still has to finish retracting.
     const settling =
       this.width.animating || this.height.animating || this.radius.animating;
-    const busy = State.mode === "hidden"
-      ? settling
-      : settling ||
-        !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive;
+    // While the island is on screen Mochi is alive — breathing, blinking, the
+    // pills wandering — so the loop keeps running. Hidden, only the retract
+    // animation may finish, and then the loop stops dead.
+    const busy = State.mode === "hidden" ? settling : true;
 
     if (busy) {
+      // The loop no longer stops while the island is visible, so the audio
+      // context is told it may sleep here instead; any sound wakes it again.
+      Sound.idle();
       requestAnimationFrame(this.frame);
     } else {
       this.running = false;
@@ -761,17 +857,18 @@ export class Island {
   private drawBot(dt: number) {
     const size = this.botSize.value;
     const w = Math.max(1, Math.round(size));
-    const hCss = w + BOT_OVERHANG;
+    const wCss = w + BOT_PAD_X * 2;
+    const hCss = w + BOT_OVERHANG + BOT_PAD_BOTTOM;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     if (this.canvasPx !== w) {
       this.canvasPx = w;
-      this.botCanvas.width = Math.round(w * dpr);
+      this.botCanvas.width = Math.round(wCss * dpr);
       this.botCanvas.height = Math.round(hCss * dpr);
-      this.botCanvas.style.width = `${w}px`;
+      this.botCanvas.style.width = `${wCss}px`;
       this.botCanvas.style.height = `${hCss}px`;
     }
-    this.botCanvas.style.left = `${this.botCx.value - w / 2}px`;
-    this.botCanvas.style.top = `${this.botCy.value - BOT_OVERHANG / 2 - hCss / 2}px`;
+    this.botCanvas.style.left = `${this.botCx.value - wCss / 2}px`;
+    this.botCanvas.style.top = `${this.botCy.value - BOT_OVERHANG - w / 2}px`;
 
     const ctx = this.botCanvas.getContext("2d");
     if (!ctx) return;
@@ -779,6 +876,7 @@ export class Island {
     const focus = State.focusTask;
     this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
     this.engine.particleOverhang = BOT_OVERHANG;
+    this.engine.particlePadX = BOT_PAD_X;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
     if (this.engine.morph > 0.3) {
@@ -792,8 +890,8 @@ export class Island {
     }
     this.engine.update(dt);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, hCss);
-    this.engine.draw(ctx, w, hCss);
+    ctx.clearRect(0, 0, wCss, hCss);
+    this.engine.draw(ctx, wCss, hCss);
   }
 
   /** BotCanvasView.lookX / lookY — tanh of the distance to the bot. */
@@ -828,6 +926,13 @@ export class Island {
     this.contentEl.style.opacity = expanded && !greetingActive ? "1" : "0";
     this.contentEl.style.pointerEvents = expanded && !greetingActive ? "auto" : "none";
     this.greetingCanvas.style.display = greetingActive ? "block" : "none";
+
+    // Styling hooks: the aura, the shadow and a few view-specific touches read these.
+    this.islandEl.dataset.state = State.effectiveState;
+    this.islandEl.dataset.mode = State.mode;
+    this.islandEl.dataset.view = State.view;
+
+    if (this.lastSyncedView !== State.view) this.prepareViewEntrance(this.lastSyncedView, State.view);
 
     this.header.sync();
     for (const [name, view] of this.views) {
@@ -867,6 +972,23 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+  }
+
+  /**
+   * Tabs slide in from their side of the header; alerts rise from below. The
+   * entering view is snapped to its start offset first, so the transition
+   * always starts from the right place whatever view came before.
+   */
+  private prepareViewEntrance(from: IslandViewName | null, to: IslandViewName) {
+    const a = from != null ? TAB_ORDER[from] : undefined;
+    const b = TAB_ORDER[to];
+    const dir = a != null && b != null && a !== b ? (b > a ? "right" : "left") : "up";
+    this.viewsEl.dataset.dir = dir;
+    const entering = this.views.get(to)?.el;
+    if (!entering) return;
+    entering.style.transition = "none";
+    void entering.offsetWidth;
+    entering.style.transition = "";
   }
 
   /** Applies settings coming from Rust at boot. */

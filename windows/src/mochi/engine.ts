@@ -12,7 +12,12 @@ import type { BotEmoteName, BotStateName } from "../core/layout";
 
 export type EyeShape =
   | "pill" | "wide" | "dot" | "line" | "flat" | "happy" | "closed"
-  | "spiral" | "heart" | "star" | "tired" | "wink" | "cup";
+  | "spiral" | "heart" | "star" | "tired" | "wink" | "cup"
+  // Windows additions: big shiny eyes and the "><" squeeze of a laugh.
+  | "sparkle" | "squeeze";
+
+/** Tiny mouth drawn on the sphere under the eyes. Mochi has none at rest. */
+export type MouthShape = "none" | "smile" | "grin" | "o" | "cat" | "flat" | "wobble" | "hmm";
 
 export type BadgeKind = "dots" | "bang" | "question" | "dot";
 
@@ -52,11 +57,21 @@ interface BotStateCfg {
   tilt: number;
 }
 
+export type ParticleType =
+  | "heart" | "star" | "spark" | "sweat" | "z"
+  | "confetti" | "note" | "sparkle" | "anger" | "puff" | "qmark";
+
 interface Particle {
-  type: "heart" | "star" | "spark" | "sweat" | "z";
+  type: ParticleType;
   x: number; y: number; vx: number; vy: number;
   age: number; life: number; rot: number; size: number;
+  /** Downward acceleration, in the same units as vy (confetti falls). */
+  g?: number;
+  color?: string;
+  spin?: number;
 }
+
+const CONFETTI = ["#FF6B6B", "#FFD166", "#06D6A0", "#4CC9F0", "#B794F6", "#FF8FAB"];
 
 // ── Constants (MochiConst / PISTES.mochi) ─────────────────────────────────────
 
@@ -112,7 +127,60 @@ export const STATE_SOUND: Partial<Record<BotStateName, string>> = {
 const EMOTE_EYE: Record<BotEmoteName, EyeShape> = {
   love: "heart", surprised: "dot", proud: "star", wink: "wink",
   yawn: "tired", happy: "happy", annoyed: "line",
+  giggle: "squeeze", shy: "happy", excited: "sparkle", curious: "wide",
+  sneeze: "squeeze", whistle: "closed", dance: "happy", spin: "pill",
+  stretch: "squeeze", celebrate: "happy", sleepy: "tired", pout: "flat",
+  purr: "happy", lookAround: "pill", hop: "happy",
 };
+
+const EMOTE_MOUTH: Partial<Record<BotEmoteName, MouthShape>> = {
+  love: "cat", surprised: "o", proud: "smile", happy: "smile", annoyed: "flat",
+  yawn: "o", giggle: "grin", shy: "cat", excited: "grin", curious: "o",
+  sneeze: "o", whistle: "o", dance: "smile", celebrate: "grin", sleepy: "o",
+  pout: "wobble", purr: "cat", hop: "smile",
+};
+
+/** How long each emote holds its face, seconds (1.8 when not listed). */
+const EMOTE_DURATION: Partial<Record<BotEmoteName, number>> = {
+  dance: 2.0, lookAround: 2.1, sneeze: 1.6, sleepy: 2.3, whistle: 1.9, stretch: 1.45,
+  spin: 1.1, hop: 0.6, giggle: 1.5, curious: 1.6, purr: 1.5,
+};
+
+/** A face for the states where Mochi has something to say about it. */
+const STATE_MOUTH: Partial<Record<BotStateName, MouthShape>> = {
+  finished: "smile", error: "wobble", approval: "o", question: "hmm",
+  thinking: "hmm", ratelimit: "flat", dizzy: "wobble",
+};
+
+/** Which sound goes with an emote the user caused (idle fidgets stay silent). */
+export const EMOTE_SOUND: Partial<Record<BotEmoteName, string>> = {
+  love: "love", surprised: "pop", proud: "proud", wink: "wink", yawn: "yawn",
+  giggle: "pop", shy: "love", excited: "proud", curious: "question", sneeze: "pop",
+  dance: "finish", spin: "blip", celebrate: "finish", pout: "annoyed", purr: "love",
+  hop: "blip",
+};
+
+/** Moods an idle Mochi drifts through on its own, weighted by time of day. */
+export type FidgetName = Extract<BotEmoteName,
+  "lookAround" | "hop" | "whistle" | "stretch" | "yawn" | "spin" | "curious" |
+  "sneeze" | "dance" | "wink" | "sleepy" | "giggle">;
+
+export function pickFidget(hour: number, rand = Math.random): FidgetName {
+  const night = hour >= 23 || hour < 5;
+  const morning = hour >= 6 && hour < 11;
+  const weights: [FidgetName, number][] = [
+    ["lookAround", 6], ["hop", 4], ["whistle", 3], ["curious", 3], ["wink", 2],
+    ["spin", 2], ["giggle", 1.5], ["dance", 1], ["sneeze", 0.6],
+    ["stretch", morning ? 4 : 1.2], ["yawn", night ? 4 : 0.8], ["sleepy", night ? 3 : 0.3],
+  ];
+  const total = weights.reduce((sum, [, w]) => sum + w, 0);
+  let r = rand() * total;
+  for (const [name, w] of weights) {
+    r -= w;
+    if (r <= 0) return name;
+  }
+  return "lookAround";
+}
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -179,6 +247,19 @@ export class BotEngine {
 
   /** Extra canvas height above the body so hearts can fly out without clipping. */
   particleOverhang = 0;
+  /** Extra canvas width on each side, so confetti and notes are not cut off. */
+  particlePadX = 0;
+
+  // Mouth: the shape asked for, until when, and how visible it is (0…1).
+  mouthShape: MouthShape = "none";
+  mouthUntil = 0;
+  private mouthS = 0;
+  private mouthDrawn: MouthShape = "none";
+
+  // Both hands up (celebrate, dance, stretch).
+  private cheerStart = 0;
+  private cheerUntil = 0;
+  private cheerStyle: "wave" | "up" = "wave";
 
   // Mouth spring (fraction of R)
   slotH = 0; slotHTarget = 0; slotHVel = 0; isChewing = false;
@@ -234,8 +315,13 @@ export class BotEngine {
 
     switch (next) {
       case "finished":
-        this.doRoll(950, 1);
-        setTimeout(() => this.emit("spark", 5), 500);
+        // A proper little celebration: hop, confetti, a grin and a wave of both hands.
+        this.anim("oy", [[-0.32, 170, Ease.out], [0.04, 220, Ease.easeIn], [0, 200, Ease.back]]);
+        this.anim("sy", [[0.86, 90, Ease.out], [1.14, 160, Ease.out], [0.94, 200, Ease.inOut], [1, 220, Ease.back]]);
+        this.anim("sx", [[1.12, 90, Ease.out], [0.9, 160, Ease.out], [1.04, 200, Ease.inOut], [1, 220, Ease.back]]);
+        this.burst("confetti", this.isMini ? 0 : 16);
+        this.cheer(1.3, "wave");
+        setTimeout(() => this.emit("spark", 5), 380);
         break;
       case "error":
         this.anim("ox", [
@@ -377,10 +463,12 @@ export class BotEngine {
     this.miniNextBehavior = now() + 0.8 + Math.random() * 1.7;
   }
 
-  triggerEmote(emote: BotEmoteName, duration = 1.8) {
+  triggerEmote(emote: BotEmoteName, duration = EMOTE_DURATION[emote] ?? 1.8) {
     const t = now();
     this.eyeOverride = EMOTE_EYE[emote];
     this.eyeOverrideUntil = t + duration;
+    const mouth = EMOTE_MOUTH[emote];
+    if (mouth) this.say(mouth, duration);
 
     switch (emote) {
       case "love":
@@ -421,10 +509,176 @@ export class BotEngine {
         this.eyeOverrideUntil = t + 0.8;
         setTimeout(() => Sound.play("annoyed"), 60);
         break;
+      case "giggle": {
+        // Little shoulder-shaking laugh.
+        const keys: TweenKey[] = [];
+        for (let i = 0; i < 5; i++) keys.push([-0.06, 70, Ease.out], [0, 80, Ease.inOut]);
+        this.anim("oy", keys);
+        this.anim("blush", [[0.9, 180, Ease.out], [0.9, (duration - 0.5) * 1000, Ease.lin], [0, 320, Ease.inOut]]);
+        this.anim("tilt", [[0.08, 120, Ease.out], [-0.06, 260, Ease.inOut], [0.05, 260, Ease.inOut], [0, 240, Ease.inOut]]);
+        break;
+      }
+      case "shy":
+        this.anim("yaw", [[-0.55, 260, Ease.out], [-0.55, (duration - 0.6) * 1000, Ease.lin], [0, 340, Ease.inOut]]);
+        this.anim("pitch", [[0.28, 260, Ease.out], [0.28, (duration - 0.6) * 1000, Ease.lin], [0, 340, Ease.inOut]]);
+        this.anim("blush", [[1.2, 260, Ease.out], [1.2, (duration - 0.6) * 1000, Ease.lin], [0, 340, Ease.inOut]]);
+        this.anim("sy", [[0.94, 220, Ease.out], [0.94, (duration - 0.5) * 1000, Ease.lin], [1, 300, Ease.back]]);
+        this.emit("heart", 1);
+        break;
+      case "excited":
+        this.anim("oy", [
+          [-0.3, 140, Ease.out], [0, 160, Ease.easeIn], [-0.22, 130, Ease.out], [0, 160, Ease.easeIn], [0, 1, Ease.lin],
+        ]);
+        this.anim("sy", [[1.12, 140, Ease.out], [0.88, 160, Ease.easeIn], [1.1, 130, Ease.out], [0.92, 160, Ease.easeIn], [1, 200, Ease.back]]);
+        this.anim("es", [[1.2, 160, Ease.out], [1.2, (duration - 0.5) * 1000, Ease.lin], [1, 300, Ease.inOut]]);
+        this.emit("sparkle", 4);
+        this.emit("star", 2);
+        break;
+      case "curious":
+        this.anim("tilt", [[0.22, 260, Ease.back], [0.22, (duration - 0.5) * 1000, Ease.lin], [0, 260, Ease.inOut]]);
+        this.anim("es", [[1.12, 200, Ease.out], [1.12, (duration - 0.4) * 1000, Ease.lin], [1, 220, Ease.inOut]]);
+        this.stamp("qmark", 0.62, -0.95, duration * 0.9, 0.24);
+        break;
+      case "sneeze": {
+        // Ah… ah… choo! Wind-up, burst, sniff.
+        this.eyeOverride = "tired";
+        this.anim("sy", [[1.1, 380, Ease.inOut], [1.14, 260, Ease.inOut], [0.8, 70, Ease.out], [1.06, 160, Ease.out], [1, 220, Ease.back]]);
+        this.anim("sx", [[0.95, 380, Ease.inOut], [0.93, 260, Ease.inOut], [1.2, 70, Ease.out], [0.97, 160, Ease.out], [1, 220, Ease.back]]);
+        this.anim("pitch", [[-0.3, 640, Ease.inOut], [0.25, 80, Ease.out], [0, 400, Ease.inOut]]);
+        setTimeout(() => {
+          this.eyeOverride = "squeeze";
+          this.emit("puff", 3);
+          this.anim("ox", [[-0.06, 60, Ease.out], [0, 260, Ease.back]]);
+        }, 650);
+        setTimeout(() => this.blink(), 1150);
+        break;
+      }
+      case "whistle":
+        this.anim("tilt", [[-0.06, 400, Ease.inOut], [0.06, 600, Ease.inOut], [-0.04, 500, Ease.inOut], [0, 400, Ease.inOut]]);
+        for (let i = 0; i < 3; i++) setTimeout(() => this.emit("note", 1), 150 + i * 520);
+        break;
+      case "dance": {
+        const keys: TweenKey[] = [];
+        const hops: TweenKey[] = [];
+        for (let i = 0; i < 4; i++) {
+          const side = i % 2 ? 1 : -1;
+          keys.push([0.16 * side, 230, Ease.inOut]);
+          hops.push([-0.12, 110, Ease.out], [0, 120, Ease.easeIn]);
+        }
+        keys.push([0, 220, Ease.inOut]);
+        this.anim("tilt", keys);
+        this.anim("oy", hops);
+        this.cheer(duration - 0.2, "up");
+        for (let i = 0; i < 3; i++) setTimeout(() => this.emit("note", 1), 100 + i * 450);
+        break;
+      }
+      case "spin":
+        // Turns all the way round: the eyes slide off one side and come back on the other.
+        this.anim("yaw", [[Math.PI * 2, 900, Ease.inOut]], () => { this.yaw = 0; });
+        this.anim("oy", [[-0.12, 300, Ease.out], [0, 600, Ease.back]]);
+        break;
+      case "stretch":
+        this.anim("sy", [[1.26, 520, Ease.inOut], [1.26, 360, Ease.lin], [0.88, 180, Ease.out], [1, 260, Ease.back]]);
+        this.anim("sx", [[0.84, 520, Ease.inOut], [0.84, 360, Ease.lin], [1.1, 180, Ease.out], [1, 260, Ease.back]]);
+        this.cheer(1.0, "up");
+        break;
+      case "celebrate":
+        this.burst("confetti", this.isMini ? 0 : 22);
+        this.cheer(duration - 0.2, "wave");
+        this.anim("oy", [[-0.34, 170, Ease.out], [0.03, 230, Ease.easeIn], [-0.14, 140, Ease.out], [0, 200, Ease.back]]);
+        this.anim("blush", [[0.8, 200, Ease.out], [0, (duration - 0.2) * 1000, Ease.inOut]]);
+        break;
+      case "sleepy":
+        // Nods off… and jolts awake.
+        this.anim("pitch", [[-0.32, 900, Ease.inOut], [-0.2, 200, Ease.inOut], [-0.4, 500, Ease.inOut], [0.1, 120, Ease.out], [0, 300, Ease.inOut]]);
+        this.anim("sy", [[0.95, 900, Ease.inOut], [0.97, 200, Ease.inOut], [0.94, 500, Ease.inOut], [1.08, 120, Ease.out], [1, 300, Ease.back]]);
+        setTimeout(() => this.emit("z", 1), 500);
+        setTimeout(() => { this.eyeOverride = "dot"; this.say("o", 0.5); }, 1620);
+        break;
+      case "pout":
+        this.anim("sx", [[1.1, 160, Ease.out], [1.1, (duration - 0.4) * 1000, Ease.lin], [1, 240, Ease.back]]);
+        this.anim("sy", [[0.94, 160, Ease.out], [0.94, (duration - 0.4) * 1000, Ease.lin], [1, 240, Ease.back]]);
+        this.stamp("anger", 0.62, -0.88, duration * 0.85, 0.22);
+        break;
+      case "purr":
+        this.anim("blush", [[1.1, 200, Ease.out], [1.1, (duration - 0.5) * 1000, Ease.lin], [0, 300, Ease.inOut]]);
+        this.anim("tilt", [[-0.08, 220, Ease.inOut], [0.08, 300, Ease.inOut], [-0.05, 300, Ease.inOut], [0, 260, Ease.inOut]]);
+        this.anim("sx", [[1.08, 200, Ease.out], [1.03, 400, Ease.inOut], [1.07, 400, Ease.inOut], [1, 300, Ease.back]]);
+        this.emit("heart", 2);
+        break;
+      case "lookAround":
+        this.anim("yaw", [
+          [-0.62, 300, Ease.inOut], [-0.62, 450, Ease.lin], [0.62, 520, Ease.inOut],
+          [0.62, 450, Ease.lin], [0, 340, Ease.inOut],
+        ]);
+        setTimeout(() => this.blink(), 1300);
+        break;
+      case "hop":
+        this.anim("oy", [[-0.24, 150, Ease.out], [0.02, 190, Ease.easeIn], [0, 160, Ease.back]]);
+        this.anim("sy", [[0.86, 80, Ease.out], [1.1, 150, Ease.out], [0.9, 190, Ease.easeIn], [1, 200, Ease.back]]);
+        this.anim("sx", [[1.1, 80, Ease.out], [0.94, 150, Ease.out], [1.08, 190, Ease.easeIn], [1, 200, Ease.back]]);
+        break;
     }
   }
 
+  /** Confetti shoots up and out from the top of the head, then falls. */
+  burst(type: ParticleType, count: number) {
+    for (let i = 0; i < count; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+      const speed = 1.2 + Math.random() * 0.9;
+      this.particles.push({
+        type,
+        x: (Math.random() - 0.5) * 0.4,
+        y: -0.45,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        g: 3,
+        age: -Math.random() * 0.08,
+        life: 1.2 + Math.random() * 0.6,
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 14,
+        size: 0.09 + Math.random() * 0.06,
+        color: CONFETTI[i % CONFETTI.length],
+      });
+    }
+  }
+
+  /** One particle parked at a spot on the head (anger mark, question mark). */
+  private stamp(type: ParticleType, x: number, y: number, life: number, size = 0.2) {
+    this.particles.push({ type, x, y, vx: 0, vy: 0, age: 0, life, rot: 0, size });
+  }
+
+  /** Both hands up for a moment. */
+  cheer(seconds: number, style: "wave" | "up") {
+    const n = now();
+    this.cheerStart = n;
+    this.cheerUntil = n + seconds;
+    this.cheerStyle = style;
+    this.anim("hands", [[1, 200, Ease.back], [1, Math.max(0, seconds * 1000 - 420), Ease.lin], [0, 220, Ease.inOut]]);
+  }
+
+  /** A mouth for a while; it fades in and out on its own. */
+  say(shape: MouthShape, seconds: number) {
+    this.mouthShape = shape;
+    this.mouthUntil = now() + seconds;
+  }
+
+  /** True while an emote or fidget is still playing — don't stack another one. */
+  get emoting(): boolean {
+    return now() < this.eyeOverrideUntil && this.eyeOverrideUntil !== Number.POSITIVE_INFINITY;
+  }
+
   emit(type: Particle["type"], count: number) {
+    if (type === "puff") {
+      for (let i = 0; i < count; i++) {
+        this.particles.push({
+          type, x: (Math.random() - 0.5) * 0.5, y: 0.25,
+          vx: (Math.random() - 0.5) * 1.1, vy: -0.05 - Math.random() * 0.25,
+          age: -i * 0.04, life: 0.6 + Math.random() * 0.3, rot: 0, size: 0.12 + Math.random() * 0.06,
+        });
+      }
+      return;
+    }
     for (let i = 0; i < count; i++) {
       const isZ = type === "z";
       this.particles.push({
@@ -466,6 +720,7 @@ export class BotEngine {
       Math.abs(this.tgSx - this.sx) > 0.002 ||
       Math.abs(this.tgEs - this.es) > 0.002 ||
       this.slotH > 0.001 || Math.abs(this.slotHVel) > 0.001 ||
+      Math.abs((this.wantedMouth() === "none" ? 0 : 1) - this.mouthS) > 0.01 ||
       Math.abs(this.col[0] - this.colT[0]) > 0.003 ||
       Math.abs(this.col[1] - this.colT[1]) > 0.003 ||
       Math.abs(this.col[2] - this.colT[2]) > 0.003
@@ -590,6 +845,20 @@ export class BotEngine {
     for (const p of this.particles) p.age += dt;
     this.particles = this.particles.filter((p) => p.age < p.life);
 
+    // The little mouth eases in and out rather than popping.
+    const wanted = this.wantedMouth();
+    if (wanted !== "none") {
+      if (this.mouthDrawn !== wanted && this.mouthS > 0.15) {
+        this.mouthS += (0 - this.mouthS) * (1 - Math.pow(0.0001, dt));
+      } else {
+        this.mouthDrawn = wanted;
+        this.mouthS += (1 - this.mouthS) * (1 - Math.pow(0.0005, dt));
+      }
+    } else {
+      this.mouthS += (0 - this.mouthS) * (1 - Math.pow(0.0005, dt));
+      if (this.mouthS < 0.01) this.mouthDrawn = "none";
+    }
+
     // Mouth slot spring — ω₀ = 2π/0.25, ζ = 0.6
     const omega = (2 * Math.PI) / 0.25;
     const zeta = 0.6;
@@ -598,6 +867,12 @@ export class BotEngine {
     this.slotH = Math.max(0, this.slotH + this.slotHVel * dt);
 
     this.lastTime = n;
+  }
+
+  private wantedMouth(): MouthShape {
+    if (this.isMini || this.morph > 0.2) return "none";
+    if (now() < this.mouthUntil) return this.mouthShape;
+    return STATE_MOUTH[this.state] ?? "none";
   }
 
   private doMiniBehaviorLoop() {
@@ -629,8 +904,25 @@ export class BotEngine {
         this.anim("tilt", [[-0.1, 180, Ease.out], [0.1, 340, Ease.inOut], [0, 220, Ease.inOut]]);
         this.miniNextBehavior = n + 2.6 + Math.random() * 1.5;
         break;
-      default:
-        this.miniNextBehavior = n + 3.0 + Math.random() * 2.0;
+      default: {
+        // Pills without a set mood still have a life: a hop, a wink, a turn.
+        const roll = Math.random();
+        if (this.state === "idle" && !this.locks.has("oy") && !this.locks.has("yaw")) {
+          if (roll < 0.3) {
+            this.anim("oy", [[-0.22, 120, Ease.out], [0.02, 160, Ease.easeIn], [0, 140, Ease.back]]);
+            this.anim("sy", [[0.86, 70, Ease.out], [1.12, 120, Ease.out], [0.92, 160, Ease.easeIn], [1, 180, Ease.back]]);
+          } else if (roll < 0.5) {
+            this.eyeOverride = "wink";
+            this.eyeOverrideUntil = n + 0.5;
+          } else if (roll < 0.6) {
+            this.anim("yaw", [[Math.PI * 2, 800, Ease.inOut]], () => { this.yaw = 0; });
+          } else if (roll < 0.72) {
+            this.eyeOverride = "happy";
+            this.eyeOverrideUntil = n + 0.9;
+          }
+        }
+        this.miniNextBehavior = n + 3.5 + Math.random() * 5;
+      }
     }
   }
 
@@ -640,12 +932,15 @@ export class BotEngine {
    * Draws hands, body, blush, eyes, mouth, badge and particles into a canvas of
    * `w`×`h` CSS pixels (the caller has already applied the DPR transform).
    */
-  draw(x: CanvasRenderingContext2D, W: number, H: number) {
-    const R = W * 0.3;
+  draw(x: CanvasRenderingContext2D, W: number, _H: number) {
+    // The body is sized from the canvas minus its side padding, so padding only
+    // buys room for particles and never changes how big Mochi is.
+    const boxW = W - this.particlePadX * 2;
+    const R = boxW * 0.3;
     const rx = R * 1.14;
     const ry = R * 0.88;
     const cx = W / 2 + this.ox * R;
-    const cy = H / 2 + this.particleOverhang / 2 + this.oy * R + R * 0.06;
+    const cy = this.particleOverhang + boxW / 2 + this.oy * R + R * 0.06;
 
     this.drawHandsBehind(x, R, rx, ry, cx, cy);
 
@@ -672,6 +967,7 @@ export class BotEngine {
     }
 
     this.drawEyes(x, body, R, rx, ry);
+    if (this.mouthS > 0.02 && this.mouthDrawn !== "none") this.drawFaceMouth(x, body, R, rx, ry);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
 
     x.restore();
@@ -796,13 +1092,50 @@ export class BotEngine {
         const hh = Math.max(h * this.open, w * 0.3);
         roundRectPath(x, -w / 2, -hh / 2, w, hh, Math.min(w / 2, hh / 2));
         x.fill();
+        this.catchlight(x, w, hh, 1);
         break;
       }
       case "dot":
         x.beginPath();
         x.arc(0, 0, w * 0.45, 0, Math.PI * 2);
         x.fill();
+        this.catchlight(x, w * 0.9, w * 0.9, 0.8);
         break;
+      case "sparkle": {
+        const sw = w * 1.22;
+        const hh = Math.max(h * 1.2 * this.open, w * 0.3);
+        roundRectPath(x, -sw / 2, -hh / 2, sw, hh, Math.min(sw / 2, hh / 2));
+        x.fill();
+        if (hh > w * 0.6 && !this.isMini) {
+          x.fillStyle = "rgba(255,255,255,0.95)";
+          x.beginPath();
+          x.arc(sw * 0.16, -hh * 0.2, sw * 0.2, 0, Math.PI * 2);
+          x.fill();
+          x.beginPath();
+          x.arc(-sw * 0.16, hh * 0.18, sw * 0.09, 0, Math.PI * 2);
+          x.fill();
+          x.save();
+          x.translate(-sw * 0.08, -hh * 0.3);
+          x.rotate(t * 2);
+          starPath(x, sw * 0.13, sw * 0.04);
+          x.fill();
+          x.restore();
+          x.fillStyle = ink;
+        }
+        break;
+      }
+      case "squeeze": {
+        // ">" on the left eye, "<" on the right — a scrunched-up laugh.
+        x.lineWidth = w * 0.34;
+        x.lineCap = "round";
+        x.lineJoin = "round";
+        x.beginPath();
+        x.moveTo(sd * w * 0.42, -h * 0.32);
+        x.lineTo(-sd * w * 0.34, 0);
+        x.lineTo(sd * w * 0.42, h * 0.32);
+        x.stroke();
+        break;
+      }
       case "line":
         x.rotate(-sd * 0.2);
         roundRectPath(x, -w * 0.78, -w * 0.21, w * 1.56, w * 0.42, w * 0.21);
@@ -891,6 +1224,110 @@ export class BotEngine {
     }
   }
 
+  /** A soft white reflection in the eye — the single biggest "alive" cue. */
+  private catchlight(x: CanvasRenderingContext2D, w: number, hh: number, strength: number) {
+    if (this.isMini || hh < w * 0.7) return;
+    x.save();
+    x.fillStyle = `rgba(255,255,255,${0.85 * strength})`;
+    x.beginPath();
+    x.arc(w * 0.16, -hh * 0.2, w * 0.17, 0, Math.PI * 2);
+    x.fill();
+    x.fillStyle = `rgba(255,255,255,${0.45 * strength})`;
+    x.beginPath();
+    x.arc(-w * 0.14, hh * 0.2, w * 0.07, 0, Math.PI * 2);
+    x.fill();
+    x.restore();
+  }
+
+  /** The small mouth under the eyes, placed on the sphere like the eyes are. */
+  private drawFaceMouth(x: CanvasRenderingContext2D, body: Path2D, R: number, rx: number, ry: number) {
+    const mouthPitch = EYE_P - 0.4 + this.pitch;
+    const cy = Math.cos(this.yaw) * Math.cos(mouthPitch);
+    if (cy <= 0.08) return;
+    const mx = Math.sin(this.yaw) * Math.cos(mouthPitch) * rx;
+    const my = -Math.sin(mouthPitch) * ry;
+    const k = this.mouthS;
+    const fx = Math.max(0.25, Math.cos(this.yaw));
+
+    x.save();
+    x.clip(body);
+    x.translate(mx, my);
+    x.scale(fx * (0.6 + 0.4 * k), 0.6 + 0.4 * k);
+    x.globalAlpha = Math.min(1, k * 1.4);
+    x.fillStyle = INK;
+    x.strokeStyle = INK;
+    x.lineCap = "round";
+    x.lineJoin = "round";
+    x.lineWidth = R * 0.07;
+    const t = now();
+
+    switch (this.mouthDrawn) {
+      case "smile":
+        x.beginPath();
+        x.arc(0, -R * 0.06, R * 0.1, Math.PI * 0.18, Math.PI * 0.82);
+        x.stroke();
+        break;
+      case "grin": {
+        const w = R * 0.15;
+        x.beginPath();
+        x.moveTo(-w, -R * 0.02);
+        x.quadraticCurveTo(0, -R * 0.045, w, -R * 0.02);
+        x.quadraticCurveTo(w * 0.9, R * 0.16, 0, R * 0.16);
+        x.quadraticCurveTo(-w * 0.9, R * 0.16, -w, -R * 0.02);
+        x.closePath();
+        x.fill();
+        x.save();
+        x.clip();
+        x.fillStyle = "#FF7A93";
+        x.beginPath();
+        x.ellipse(0, R * 0.15, w * 0.62, R * 0.07, 0, 0, Math.PI * 2);
+        x.fill();
+        x.restore();
+        break;
+      }
+      case "o": {
+        const open = 0.85 + Math.sin(t * 5) * 0.12;
+        x.beginPath();
+        x.ellipse(0, R * 0.02, R * 0.06, R * 0.075 * open, 0, 0, Math.PI * 2);
+        x.fill();
+        break;
+      }
+      case "cat":
+        x.lineWidth = R * 0.055;
+        x.beginPath();
+        x.arc(-R * 0.055, -R * 0.02, R * 0.055, Math.PI * 0.1, Math.PI * 0.95);
+        x.moveTo(R * 0.11, -R * 0.02);
+        x.arc(R * 0.055, -R * 0.02, R * 0.055, Math.PI * 0.05, Math.PI * 0.9);
+        x.stroke();
+        break;
+      case "flat":
+        x.beginPath();
+        x.moveTo(-R * 0.08, 0);
+        x.lineTo(R * 0.08, 0);
+        x.stroke();
+        break;
+      case "hmm":
+        x.beginPath();
+        x.moveTo(-R * 0.02, R * 0.01);
+        x.lineTo(R * 0.11, -R * 0.025);
+        x.stroke();
+        break;
+      case "wobble": {
+        x.lineWidth = R * 0.055;
+        x.beginPath();
+        for (let i = 0; i <= 12; i++) {
+          const px = -R * 0.12 + (i / 12) * R * 0.24;
+          const py = Math.sin(i * 1.4 + t * 10) * R * 0.025;
+          if (i === 0) x.moveTo(px, py);
+          else x.lineTo(px, py);
+        }
+        x.stroke();
+        break;
+      }
+    }
+    x.restore();
+  }
+
   /** Mailbox slot: dark pill cut into the box face, with rim and lip highlights. */
   private drawMouth(x: CanvasRenderingContext2D, body: Path2D, R: number) {
     const m = this.morph;
@@ -946,13 +1383,24 @@ export class BotEngine {
     const hwB = rx * this.sx;
     const hhB = ry * this.sy;
     const isWaving = n >= this.waveStart && this.waveStart > 0 && n < this.waveUntil;
+    const cheering = n >= this.cheerStart && n < this.cheerUntil;
 
     for (const sd of [-1, 1]) {
       let localX: number;
       let localY: number;
       let handRot = 0;
 
-      if (sd > 0 && isWaving) {
+      if (cheering) {
+        // Both hands up beside the head, waving or just held high.
+        const wt = n - this.cheerStart;
+        const rise = 1 - Math.pow(1 - Math.min(1, wt / 0.2), 3);
+        const osc = this.cheerStyle === "wave" ? Math.sin(14 * wt + (sd > 0 ? 0 : Math.PI)) : Math.sin(6 * wt) * 0.4;
+        const upX = sd * hwB * (1.12 + osc * 0.05);
+        const upY = -hhB * 0.42 - Math.abs(osc) * 0.06 * bodyH;
+        localX = lerp(sd * hwB * 1.08, upX, rise);
+        localY = lerp(hhB * 0.7, upY, rise);
+        handRot = sd * (0.35 + osc * 0.3) * rise;
+      } else if (sd > 0 && isWaving) {
         const wt = n - this.waveStart;
         const rise = Math.min(1, wt / 0.18);
         const riseEased = 1 - Math.pow(1 - rise, 3);
@@ -1072,10 +1520,14 @@ export class BotEngine {
     for (const p of this.particles) {
       if (p.age <= 0) continue;
       const k = p.age / p.life;
-      const a = k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8;
+      let a = k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8;
+      // Confetti stays bright and only fades at the very end of its fall.
+      if (p.type === "confetti") a = k < 0.75 ? 1 : 1 - (k - 0.75) / 0.25;
+      if (p.type === "anger" || p.type === "qmark") a = k < 0.12 ? k / 0.12 : k > 0.8 ? (1 - k) / 0.2 : 1;
+      const fall = p.g ? 0.5 * p.g * p.age * p.age : 0;
       const px = cx + (p.x + p.vx * p.age) * R * 1.3;
-      const py = cy + (p.y + p.vy * p.age) * R * 1.3;
-      const sz = R * p.size * (1 + k * 0.4);
+      const py = cy + (p.y + p.vy * p.age + fall) * R * 1.3;
+      const sz = R * p.size * (p.type === "confetti" ? 1 : 1 + k * 0.4);
 
       x.save();
       x.translate(px, py);
@@ -1113,6 +1565,75 @@ export class BotEngine {
           x.textAlign = "center";
           x.textBaseline = "middle";
           x.fillText("z", 0, 0);
+          break;
+        case "confetti": {
+          // A paper rectangle tumbling in 3D: its width flips as it spins.
+          x.rotate(p.rot + (p.spin ?? 0) * p.age);
+          x.scale(Math.cos(p.age * 9 + p.rot), 1);
+          x.fillStyle = p.color ?? "#fff";
+          x.fillRect(-sz * 0.5, -sz * 0.9, sz, sz * 1.8);
+          break;
+        }
+        case "note": {
+          x.rotate(Math.sin(p.age * 5) * 0.25);
+          x.fillStyle = "rgb(214,205,255)";
+          x.strokeStyle = "rgb(214,205,255)";
+          x.lineWidth = sz * 0.22;
+          x.beginPath();
+          x.ellipse(-sz * 0.3, sz * 0.55, sz * 0.38, sz * 0.28, -0.4, 0, Math.PI * 2);
+          x.fill();
+          x.beginPath();
+          x.moveTo(sz * 0.04, sz * 0.5);
+          x.lineTo(sz * 0.04, -sz * 0.75);
+          x.quadraticCurveTo(sz * 0.55, -sz * 0.55, sz * 0.5, -sz * 0.1);
+          x.stroke();
+          break;
+        }
+        case "sparkle": {
+          const tw = 0.6 + 0.4 * Math.sin(p.age * 18 + p.rot);
+          x.scale(tw, tw);
+          x.fillStyle = "#FFF6C7";
+          x.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const r = i % 2 ? sz * 0.22 : sz;
+            const ang = (i * Math.PI) / 4;
+            x.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+          }
+          x.closePath();
+          x.fill();
+          break;
+        }
+        case "anger": {
+          // The cartoon "vein" mark: four little arcs back to back, pulsing.
+          const pulse = 1 + Math.sin(p.age * 14) * 0.12;
+          x.scale(pulse, pulse);
+          x.strokeStyle = "#FF5A6E";
+          x.lineWidth = sz * 0.26;
+          x.lineCap = "round";
+          for (let i = 0; i < 4; i++) {
+            x.save();
+            x.rotate((i * Math.PI) / 2);
+            x.beginPath();
+            x.arc(sz * 0.55, sz * 0.55, sz * 0.38, Math.PI * 1.05, Math.PI * 1.45);
+            x.stroke();
+            x.restore();
+          }
+          break;
+        }
+        case "puff":
+          x.fillStyle = "rgba(225,230,240,0.7)";
+          x.beginPath();
+          x.arc(0, 0, sz * (0.6 + k * 1.2), 0, Math.PI * 2);
+          x.fill();
+          break;
+        case "qmark":
+          x.translate(0, Math.sin(p.age * 6) * sz * 0.12);
+          x.rotate(0.18);
+          x.fillStyle = "#67E8F9";
+          x.font = `900 ${sz * 2.4}px ${FONT}`;
+          x.textAlign = "center";
+          x.textBaseline = "middle";
+          x.fillText("?", 0, 0);
           break;
       }
       x.restore();

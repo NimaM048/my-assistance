@@ -37,7 +37,11 @@ export type BotStateName =
   | "sleeping"
   | "dizzy";
 
-export type BotEmoteName = "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed";
+export type BotEmoteName =
+  | "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed"
+  // Added on Windows: more moods for idle moments and for poking Mochi.
+  | "giggle" | "shy" | "excited" | "curious" | "sneeze" | "whistle" | "dance"
+  | "spin" | "stretch" | "celebrate" | "sleepy" | "pout" | "purr" | "lookAround" | "hop";
 
 export type AgentLayoutMode = "none" | "grid" | "pills" | "column";
 

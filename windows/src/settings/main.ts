@@ -5,7 +5,10 @@
 import "./settings.css";
 import { Bridge, onEvent, type HookStatus } from "../core/bridge";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
-import { h, clear } from "../views/dom";
+import { h, clear, svg } from "../views/dom";
+import { ICONS } from "../views/icons";
+import { BotEngine, type RGB } from "../mochi/engine";
+import { mochiPortrait } from "../mochi/portrait";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -18,18 +21,34 @@ async function save() {
 
 // ── Reusable bits ─────────────────────────────────────────────────────────────
 
-function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
-  const el = h("button", { class: on ? "switch on" : "switch", "aria-pressed": on });
+function toggle(on: boolean, onChange: (v: boolean) => void, label: string): HTMLElement {
+  const el = h("button", { class: on ? "switch on" : "switch", role: "switch", "aria-checked": String(on), "aria-label": label });
   el.addEventListener("click", () => {
     const next = !el.classList.contains("on");
     el.classList.toggle("on", next);
+    el.setAttribute("aria-checked", String(next));
     onChange(next);
   });
   return el;
 }
 
 function statusDot(ok: boolean): HTMLElement {
-  return h("i", { class: "dot", style: `background:${ok ? "#22c55e" : "#f4505e"}` });
+  return h("i", { class: ok ? "dot ok" : "dot off" });
+}
+
+/** "Installed", "No key"… — a small coloured pill at the end of a card header. */
+function badge(text: string, tone: "ok" | "off" | "warn"): HTMLElement {
+  return h("span", { class: `badge ${tone}` }, h("i"), h("span", { text }));
+}
+
+function cardHead(icon: string, title: string, sub: string, extra?: Node | null): HTMLElement {
+  return h(
+    "header",
+    { class: "card-head" },
+    h("span", { class: "card-icon", "aria-hidden": "true" }, svg(icon, 15)),
+    h("div", { class: "card-title" }, h("h2", { text: title }), h("p", { text: sub })),
+    extra ?? null,
+  );
 }
 
 function renderDiff(text: string): HTMLElement {
@@ -41,25 +60,55 @@ function renderDiff(text: string): HTMLElement {
   return box;
 }
 
+/** Brief "Saved ✓" on a button, then back to its label. */
+function flash(button: HTMLElement, label: string, ok = true) {
+  button.classList.remove("saved", "failed");
+  void button.offsetWidth;
+  button.classList.add(ok ? "saved" : "failed");
+  button.textContent = ok ? "Saved ✓" : "Failed";
+  window.setTimeout(() => {
+    button.classList.remove("saved", "failed");
+    button.textContent = label;
+  }, 1400);
+}
+
+// ── Header Mochi ──────────────────────────────────────────────────────────────
+
+/** A live Mochi next to the title: waves hello, watches the pointer, reacts to clicks. */
+function headerMochi(): HTMLElement {
+  const canvas = mochiPortrait({
+    size: 58, greet: true, follow: true,
+    clickMoods: ["giggle", "love", "wink", "excited", "shy"],
+    label: "Mochi — click me",
+  });
+  canvas.classList.add("head-mochi");
+  canvas.title = "Hi! I'm Mochi.";
+  return canvas;
+}
+
 // ── Claude Code section ───────────────────────────────────────────────────────
 
 function claudeSection(status: HookStatus): HTMLElement {
-  const body = h("div", { style: "display:flex;flex-direction:column;gap:12px" });
-  const section = h(
-    "section",
-    {},
-    h("h2", {}, statusDot(status.installed), h("span", { text: "Claude Code" })),
-    body,
-  );
+  const body = h("div", { class: "card-body" });
+  const headSlot = h("div", { class: "head-slot" });
+  const section = h("section", { class: "card" }, headSlot, body);
+
+  const drawHead = () => {
+    clear(headSlot);
+    headSlot.append(cardHead(
+      ICONS.code,
+      "Claude Code",
+      "Live sessions and permission requests in the island.",
+      status.installed ? badge("Hooks installed", "ok") : badge("Not installed", "off"),
+    ));
+  };
 
   const rebuild = async () => {
     const fresh = await Bridge.hooksStatus();
     if (fresh) Object.assign(status, fresh);
     clear(body);
     draw();
-    const head = section.querySelector("h2")!;
-    clear(head);
-    head.append(statusDot(status.installed), h("span", { text: "Claude Code" }));
+    drawHead();
   };
 
   function draw() {
@@ -70,13 +119,12 @@ function claudeSection(status: HookStatus): HTMLElement {
           ? "Coucou is hooked into your Claude Code sessions. Tool calls, questions and permission requests show up in the island, and you can answer them there."
           : "Install the hooks to see your Claude Code sessions in the island and approve permissions without leaving what you are doing.",
       }),
-      h("div", { class: "row" },
+      h("div", { class: "kv" },
         h("label", { text: "settings.json" }),
-        h("span", { class: "path", text: status.settingsPath }),
-      ),
-      h("div", { class: "row" },
+        h("span", { class: "path", text: status.settingsPath || "—" }),
+        h("span"),
         h("label", { text: "Relay" }),
-        h("span", { class: "path", text: status.hookPath }),
+        h("span", { class: "path", text: status.hookPath || "—" }),
         statusDot(status.hookReady),
       ),
     );
@@ -167,6 +215,7 @@ function claudeSection(status: HookStatus): HTMLElement {
     })));
   }
 
+  drawHead();
   draw();
   return section;
 }
@@ -176,9 +225,8 @@ function claudeSection(status: HookStatus): HTMLElement {
 function codexChatSection(): HTMLElement {
   return h(
     "section",
-    {},
-    h("h2", {}, statusDot(true), h("span", { text: "Codex chat" })),
-    h("div", { class: "hint", text: "Uses your signed-in Codex account. No separate API key is needed." }),
+    { class: "card" },
+    cardHead(ICONS.bubble, "Codex chat", "Uses your signed-in Codex account. No separate API key is needed.", badge("Ready", "ok")),
   );
 }
 
@@ -213,94 +261,164 @@ const INTEGRATIONS: IntegrationDef[] = [
 
 const MAX_ACTIVE = 4;
 
-function integrationsSection(present: Record<string, boolean>): HTMLElement {
-  const note = h("div", { class: "hint" });
-  const list = h("div", { style: "display:flex;flex-direction:column;gap:14px" });
+/** A tiny Mochi face in the integration's colour, drawn once. */
+function integrationAvatar(color: string): HTMLElement {
+  const size = 30;
+  const canvas = h("canvas", { class: "int-avatar", "aria-hidden": "true" }) as HTMLCanvasElement;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  const engine = new BotEngine();
+  engine.isMini = true;
+  const v = parseInt(color.slice(1), 16);
+  engine.bodyColor = [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255] as RGB;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    engine.draw(ctx, size, size);
+  }
+  return canvas;
+}
 
-  function updateNote() {
+function integrationsSection(present: Record<string, boolean>): HTMLElement {
+  const counter = h("span", { class: "badge neutral" });
+  const list = h("div", { class: "int-list" });
+
+  function updateCounter() {
     const used = settings.activeIntegrations.length;
-    note.textContent = `Pick up to ${MAX_ACTIVE} pills to show next to Mochi — ${used}/${MAX_ACTIVE} in use. Keys are stored in the Windows Credential Manager, never on disk.`;
+    counter.textContent = `${used}/${MAX_ACTIVE} pills`;
+    counter.classList.toggle("full", used >= MAX_ACTIVE);
   }
 
   for (const def of INTEGRATIONS) {
     const active = settings.activeIntegrations.includes(def.id);
-    const sw = h("button", { class: active ? "switch on" : "switch" });
+    const item = h("div", { class: active ? "int-item on" : "int-item" });
+    const sw = h("button", {
+      class: active ? "switch on" : "switch",
+      role: "switch",
+      "aria-checked": String(active),
+      "aria-label": `Show ${def.name} next to Mochi`,
+    });
+    const state = h("span", { class: "badge" });
+    const refreshState = () => {
+      const ready = def.fields.every((f) => present[f.key]);
+      state.className = `badge ${ready ? "ok" : "off"}`;
+      clear(state);
+      state.append(h("i"), h("span", { text: ready ? "Connected" : "No key" }));
+    };
+    refreshState();
+
     sw.addEventListener("click", () => {
       const on = settings.activeIntegrations.includes(def.id);
       if (on) {
         settings.activeIntegrations = settings.activeIntegrations.filter((x) => x !== def.id);
       } else {
-        if (settings.activeIntegrations.length >= MAX_ACTIVE) return;
+        if (settings.activeIntegrations.length >= MAX_ACTIVE) {
+          // Say no visibly instead of silently ignoring the click.
+          item.classList.remove("refuse");
+          void item.offsetWidth;
+          item.classList.add("refuse");
+          counter.classList.remove("refuse");
+          void counter.offsetWidth;
+          counter.classList.add("refuse");
+          return;
+        }
         settings.activeIntegrations = [...settings.activeIntegrations, def.id];
       }
       sw.classList.toggle("on", !on);
-      updateNote();
+      sw.setAttribute("aria-checked", String(!on));
+      item.classList.toggle("on", !on);
+      updateCounter();
       void save();
     });
 
-    const rows = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0" });
+    const fields = h("div", { class: "int-fields" });
     for (const field of def.fields) {
       const input = h("input", {
         type: field.secret ? "password" : "text",
         placeholder: present[field.key] ? "••••••••  (stored)" : field.placeholder,
         autocomplete: "off",
         spellcheck: "false",
-        style: "flex:1 1 auto;min-width:0",
+        "aria-label": `${def.name} ${field.label}`,
       }) as HTMLInputElement;
-      const saveBtn = h("button", { text: "Save" });
-      const dotEl = statusDot(present[field.key] ?? false);
-      saveBtn.addEventListener("click", async () => {
+      const saveBtn = h("button", { class: "save", text: "Save" });
+      const doSave = async () => {
         const value = input.value.trim();
+        saveBtn.setAttribute("disabled", "");
         try {
           await Bridge.secretSet(field.key, value);
           present[field.key] = value.length > 0;
           input.value = "";
           input.placeholder = value ? "••••••••  (stored)" : field.placeholder;
-          dotEl.style.background = value ? "#22c55e" : "#f4505e";
+          refreshState();
+          flash(saveBtn, "Save", true);
         } catch {
-          dotEl.style.background = "#f5a524";
+          flash(saveBtn, "Save", false);
+        } finally {
+          saveBtn.removeAttribute("disabled");
         }
+      };
+      saveBtn.addEventListener("click", () => void doSave());
+      input.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") void doSave();
       });
-      rows.append(
-        h("div", { class: "row" },
-          h("label", { style: "min-width:104px", text: field.label }),
-          input, saveBtn, dotEl,
-        ),
-      );
+      fields.append(h("label", { text: field.label }), input, saveBtn);
     }
 
-    list.append(
-      h("div", { style: "display:flex;gap:12px;align-items:flex-start" },
-        h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px" },
-          sw,
-          h("i", { class: "dot", style: `background:${def.color}` }),
-          h("span", { style: "font-size:14px", text: def.name }),
-        ),
-        rows,
+    item.append(
+      h("div", { class: "int-item-head" },
+        integrationAvatar(def.color),
+        h("b", { text: def.name }),
+        state,
+        h("span", { class: "grow" }),
+        sw,
       ),
+      fields,
     );
+    list.append(item);
   }
 
-  updateNote();
-  return h("section", {}, h("h2", {}, h("span", { text: "Integrations" })), note, list);
+  updateCounter();
+  return h(
+    "section",
+    { class: "card" },
+    cardHead(ICONS.grid, "Integrations", "Pick up to four pills to show next to Mochi. Keys live in the Windows Credential Manager, never on disk.", counter),
+    list,
+  );
 }
 
 // ── General section ───────────────────────────────────────────────────────────
+
+function pref(label: string, hint: string, ...controls: Node[]): HTMLElement {
+  return h(
+    "div",
+    { class: "pref" },
+    h("div", { class: "pref-text" }, h("b", { text: label }), hint ? h("small", { text: hint }) : null),
+    h("div", { class: "pref-control" }, ...controls),
+  );
+}
 
 function generalSection(): HTMLElement {
   const volume = h("input", {
     type: "range", min: "0", max: "0.2", step: "0.005",
     value: String(settings.soundVolume),
+    "aria-label": "Volume",
   }) as HTMLInputElement;
+  const paintVolume = () => volume.style.setProperty("--fill", `${(Number(volume.value) / 0.2) * 100}%`);
+  paintVolume();
   volume.addEventListener("input", () => {
     settings.soundVolume = Number(volume.value);
+    paintVolume();
     void save();
   });
 
   const autoClose = h("input", {
     type: "number", min: "5", max: "120", step: "1",
     value: String(Math.round(settings.autoCloseInterval)),
-    style: "width:72px",
+    class: "num",
+    "aria-label": "Auto-close after, in seconds",
   }) as HTMLInputElement;
   autoClose.addEventListener("change", () => {
     settings.autoCloseInterval = Math.max(5, Math.min(120, Number(autoClose.value) || 15));
@@ -308,7 +426,7 @@ function generalSection(): HTMLElement {
     void save();
   });
 
-  const screen = h("select", {}) as HTMLSelectElement;
+  const screen = h("select", { "aria-label": "Island lives on" }) as HTMLSelectElement;
   screen.append(
     h("option", { value: "primary", text: "Main display" }),
     h("option", { value: "cursor", text: "Display under the cursor" }),
@@ -321,25 +439,18 @@ function generalSection(): HTMLElement {
 
   return h(
     "section",
-    {},
-    h("h2", {}, h("span", { text: "General" })),
-    h("div", { class: "row" },
-      h("label", { text: "Sound" }),
-      toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }),
-      volume,
-    ),
-    h("div", { class: "row" },
-      h("label", { text: "Auto-close" }),
-      autoClose,
-      h("span", { class: "hint", text: "seconds after you leave the island" }),
-    ),
-    h("div", { class: "row" },
-      h("label", { text: "Island lives on" }),
-      screen,
-    ),
-    h("div", { class: "row" },
-      h("label", { text: "Launch at startup" }),
-      toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
+    { class: "card" },
+    cardHead(ICONS.gear, "General", "How Mochi sounds, when it tucks itself away, and where it lives."),
+    h("div", { class: "prefs" },
+      pref("Sound", "Little chirps, pops and boops.",
+        volume,
+        toggle(settings.soundEnabled, (v) => { settings.soundEnabled = v; void save(); }, "Sound"),
+      ),
+      pref("Auto-close", "Seconds after you leave the island.", autoClose, h("span", { class: "unit", text: "s" })),
+      pref("Island lives on", "", screen),
+      pref("Launch at startup", "Say hi every time you log in.",
+        toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }, "Launch at startup"),
+      ),
     ),
   );
 }
@@ -365,15 +476,21 @@ async function main() {
 
   clear(root);
   root.append(
-    h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+    h("header", { class: "page-head" },
+      headerMochi(),
+      h("div", {},
+        h("h1", {}, h("span", { text: "Coucou" }), version ? h("span", { class: "version", text: `v${version}` }) : null),
+        h("p", { class: "tagline", text: "Settings — everything here stays on this PC." }),
+      ),
+    ),
     claudeSection(status),
     codexChatSection(),
     integrationsSection(present),
     generalSection(),
-    h("div", {
-      class: "hint",
-      text: "No telemetry. Network requests only go to the services you configure yourself.",
-    }),
+    h("footer", { class: "foot" },
+      svg(ICONS.lock, 12),
+      h("span", { text: "No telemetry. Network requests only go to the services you configure yourself." }),
+    ),
   );
 
   void onEvent<Settings>("settings-changed", (s) => {

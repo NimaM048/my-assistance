@@ -87,7 +87,8 @@ fn main() {
     });
 
     if let Ok(Some(decision)) = rx.recv_timeout(budget) {
-        if let Some(json) = decision_json(&decision) {
+        let codex = std::env::args().any(|arg| arg == "--codex");
+        if let Some(json) = decision_json(&decision, codex) {
             let mut out = std::io::stdout();
             let _ = writeln!(out, "{json}");
             let _ = out.flush();
@@ -100,7 +101,17 @@ fn main() {
 /// The documented PermissionRequest output. Anything we do not recognise prints
 /// nothing at all rather than guessing — silence is the safe answer.
 /// See https://code.claude.com/docs/en/hooks
-fn decision_json(decision: &str) -> Option<String> {
+fn decision_json(decision: &str, codex: bool) -> Option<String> {
+    if codex {
+        let behavior = match decision.trim() {
+            "allow" | "always" => r#"{"behavior":"allow"}"#,
+            "deny" => r#"{"behavior":"deny","message":"Denied from Coucou"}"#,
+            _ => return None,
+        };
+        return Some(format!(
+            r#"{{"hookSpecificOutput":{{"hookEventName":"PermissionRequest","decision":{behavior}}}}}"#
+        ));
+    }
     let behavior = match decision.trim() {
         // "always" still answers a plain allow; remembering it is the island's
         // business, not Claude Code's.
@@ -127,16 +138,47 @@ fn read_event() -> Option<(String, String)> {
     let mut payload = serde_json::from_slice::<serde_json::Value>(&raw).ok()?;
     let map = payload.as_object_mut()?;
 
-    // The event name is passed as argv[1] by the hook command; the JSON usually
-    // carries it too. Trust argv when the JSON is missing it.
+    // Codex's notify command sends its event type in `type`; map completed turns
+    // to their own event so the island can always surface a completion alert.
+    let codex_notify = std::env::args().any(|arg| arg == "codex-notify");
     let arg_event = std::env::args().nth(1).unwrap_or_default();
-    let event = map
-        .get("hook_event_name")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(arg_event);
+    let event = if codex_notify {
+        if map.get("type").and_then(|v| v.as_str()) != Some("agent-turn-complete") {
+            return None;
+        }
+        "CodexTurnComplete".to_string()
+    } else {
+        map.get("hook_event_name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(arg_event)
+    };
     map.insert("hook_event_name".into(), serde_json::Value::String(event.clone()));
+
+    // Codex permission hooks do not supply Coucou's request_id. Give each
+    // approval a stable, session-scoped id so the existing relay can return it.
+    if std::env::args().any(|arg| arg == "--codex") || codex_notify {
+        map.insert("agent_source".into(), serde_json::Value::String("codex".into()));
+    }
+    if codex_notify {
+        if let Some(thread_id) = map.get("thread-id").and_then(|v| v.as_str()) {
+            map.insert("session_id".into(), serde_json::Value::String(thread_id.to_string()));
+        }
+        if let Some(turn_id) = map.get("turn-id").and_then(|v| v.as_str()) {
+            map.insert("turn_id".into(), serde_json::Value::String(turn_id.to_string()));
+        }
+        if let Some(message) = map.get("last-assistant-message").and_then(|v| v.as_str()) {
+            map.insert("last_assistant_message".into(), serde_json::Value::String(message.to_string()));
+        }
+    }
+    if std::env::args().any(|arg| arg == "--codex") {
+        if event == "PermissionRequest" {
+            let session = map.get("session_id").and_then(|v| v.as_str()).unwrap_or("codex");
+            let tool = map.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("request");
+            map.insert("request_id".into(), serde_json::Value::String(format!("codex:{session}:{tool}")));
+        }
+    }
 
     for field in DROPPED_FIELDS {
         map.remove(*field);

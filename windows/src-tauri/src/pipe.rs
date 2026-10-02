@@ -127,6 +127,7 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
 
     if event != "PermissionRequest" {
         log::line(format!("hook {event}"));
+        crate::hub_events::publish_hook_event(&app, &payload);
         let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
         let _ = pipe.disconnect();
         return;
@@ -140,6 +141,7 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
     }
     payload["request_id"] = json!(id);
     log::line(format!("hook PermissionRequest id={id}"));
+    crate::hub_events::publish_hook_event(&app, &payload);
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
 
     let decision = wait_for_decision(&id, &mut rx).await;
@@ -147,6 +149,12 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
 
     // No decision: say nothing at all. coucou-hook then writes nothing to stdout
     // and Claude Code asks in the terminal, exactly as if Coucou were closed.
+    let resolution = match decision.as_deref() {
+        Some("allow") => "approved",
+        Some("deny") => "denied",
+        _ => "closed",
+    };
+    crate::hub_events::resolve_approval(&app, &id, resolution);
     if let Some(d) = decision {
         let _ = pipe.write_all(format!("{d}\n").as_bytes()).await;
         let _ = pipe.flush().await;

@@ -56,6 +56,13 @@ export const Bridge = {
   quit: () => call<void>("quit_app"),
 
   openSettingsWindow: () => call<void>("open_settings_window"),
+  openHubWindow: () => call<void>("open_hub_window"),
+  planNotification: (title: string, body: string) => call<boolean>("show_plan_notification", { title, body }),
+  hubRepositories: () => callOrThrow<GitHubCatalog>("hub_repositories"),
+  hubWorkQueue: () => callOrThrow<GitHubWorkQueue>("hub_work_queue"),
+  projectStatusLocal: (cwd: string) => callOrThrow<ProjectStatus>("project_status_local", { cwd }),
+  searchLocalProjects: (projects: SearchProject[], query: string) => callOrThrow<ProjectSearchHit[]>("search_local_projects", { projects, query }),
+  openProjectFile: (path: string, line: number) => call<boolean>("open_project_file", { path, line }),
 
   /** Writes to %LOCALAPPDATA%\Coucou\coucou.log, next to the Rust lines. */
   log: (message: string) => call<void>("log_line", { message }),
@@ -80,8 +87,8 @@ export const Bridge = {
 
   // ── Chat, files, secrets ──────────────────────────────────────────────────
   /** One chat turn. The API key and any file bytes never leave Rust. */
-  chatSend: (query: string, context: ChatContext | null) =>
-    callOrThrow<{ text: string }>("chat_send", { query, context }),
+  chatSend: (query: string, context: ChatContext | null, cwd: string | null) =>
+    callOrThrow<{ text: string }>("chat_send", { query, context, cwd }),
   chatReset: () => call<void>("chat_reset"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
@@ -92,6 +99,7 @@ export const Bridge = {
 
   // ── Integrations ──────────────────────────────────────────────────────────
   refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
+  projectStatus: (cwd: string) => callOrThrow<ProjectStatus>("project_status", { cwd }),
   /** Opens the configured n8n instance in the browser. */
   openN8n: () => call<void>("open_n8n"),
 
@@ -114,6 +122,74 @@ export interface DroppedFile {
   name: string;
   path: string;
   size: number;
+}
+
+export interface ProjectStatus {
+  projectName: string;
+  path: string;
+  branch: string | null;
+  changedFiles: number;
+  changedPaths: string[];
+  stagedFiles: number;
+  unstagedFiles: number;
+  untrackedFiles: number;
+  lastCommit: string | null;
+  lastCommitAt: number | null;
+  githubRepo: string | null;
+  issues: ProjectItem[];
+  pullRequests: ProjectItem[];
+  githubError: string | null;
+  error: string | null;
+}
+
+export interface SearchProject { name: string; path: string }
+export interface ProjectSearchHit { project: string; path: string; relativePath: string; line: number; preview: string; kind: "file" | "content" }
+
+export interface ProjectItem {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+}
+
+export interface GitHubCatalog {
+  login: string;
+  repositories: GitHubRepository[];
+}
+
+export interface GitHubRepository {
+  fullName: string;
+  name: string;
+  description: string | null;
+  htmlUrl: string;
+  cloneUrl: string;
+  private: boolean;
+  fork: boolean;
+  archived: boolean;
+  language: string | null;
+  stars: number;
+  forks: number;
+  updatedAt: string;
+  localPath: string | null;
+}
+
+export interface GitHubWorkQueue {
+  items: GitHubWorkItem[];
+  warning: string | null;
+}
+
+export interface GitHubWorkItem {
+  id: string;
+  number: number;
+  title: string;
+  repository: string;
+  kind: "issue" | "pullRequest" | "review";
+  htmlUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  labels: string[];
+  comments: number;
+  draft: boolean;
 }
 
 export interface HookStatus {

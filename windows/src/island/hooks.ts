@@ -4,6 +4,7 @@
 // terminal (Windows Terminal, VS Code, PowerShell…) and all of them are handled.
 
 import { Bridge, onEvent } from "../core/bridge";
+import { captureHandoff } from "../core/handoff";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
@@ -12,13 +13,18 @@ const CLAUDE_ID = "integration_claude";
 
 /** Clears the approval card if no decision was made before the hook gave up. */
 let pendingTimeout: number | null = null;
+const completedCodexTurns = new Set<string>();
+const promptsBySession = new Map<string, string>();
 
 interface HookPayload {
   hook_event_name?: string;
+  agent_source?: "codex";
   request_id?: string;
   session_id?: string;
+  turn_id?: string;
   cwd?: string;
   message?: string;
+  last_assistant_message?: string | null;
   /** UserPromptSubmit carries `prompt`; `message` belongs to Notification/Stop. */
   prompt?: string;
   tool_name?: string;
@@ -101,11 +107,15 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
   return tool;
 }
 
-function upsert(projectName: string, cwd: string) {
+function upsert(projectName: string, cwd: string, source: "claudeCode" | "codex") {
   const t = State.tasks.find((x) => x.id === CLAUDE_ID);
   if (!t) return;
   t.name = projectName;
-  if (cwd) t.sessionCwd = cwd;
+  t.source = source;
+  if (cwd) {
+    t.sessionCwd = cwd;
+    State.activeProjectCwd = cwd;
+  }
 }
 
 function clearSession() {
@@ -114,7 +124,21 @@ function clearSession() {
   t.steps = [];
   t.stepIndex = 0;
   t.name = "VS Code";
+  t.source = "claudeCode";
   t.pillBadge = null;
+}
+
+function sessionKey(payload: HookPayload, cwd: string): string {
+  return payload.session_id || cwd.replace(/\\/g, "/").toLowerCase();
+}
+
+function saveCompletedHandoff(payload: HookPayload, cwd: string, response: string) {
+  const projectPath = cwd || State.activeProjectCwd || "";
+  const prompt = promptsBySession.get(sessionKey(payload, projectPath)) ?? payload.prompt ?? "";
+  promptsBySession.delete(sessionKey(payload, projectPath));
+  void captureHandoff(projectPath, prompt, response).then((handoff) => {
+    if (handoff) State.notify();
+  }).catch((error) => console.error("[coucou] could not save project handoff", error));
 }
 
 export function registerHookHandlers(island: Island) {
@@ -148,24 +172,38 @@ function handleHook(island: Island, payload: HookPayload) {
   };
 
   switch (name) {
+    case "CodexProjectDetected":
+      if (cwd) {
+        State.activeProjectCwd = cwd;
+        State.notify();
+      }
+      break;
+
     case "SessionStart":
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, payload.agent_source === "codex" ? "codex" : "claudeCode");
       surface("overview", false);
       Sound.play("work");
       break;
 
     case "UserPromptSubmit": {
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, payload.agent_source === "codex" ? "codex" : "claudeCode");
       State.updateTask(CLAUDE_ID, "thinking");
       // The field is `prompt`; reading `message` meant this step was always blank.
       const asked = payload.prompt ?? payload.message;
+      if (asked) {
+        promptsBySession.set(sessionKey(payload, cwd), asked);
+        if (promptsBySession.size > 100) {
+          const oldest = promptsBySession.keys().next().value;
+          if (oldest) promptsBySession.delete(oldest);
+        }
+      }
       if (asked) State.appendStep(CLAUDE_ID, asked.slice(0, 60));
       surface("overview", false);
       break;
     }
 
     case "PreToolUse": {
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, payload.agent_source === "codex" ? "codex" : "claudeCode");
       State.updateTask(CLAUDE_ID, "working");
       const tool = payload.tool_name ?? "Tool";
       State.appendStep(CLAUDE_ID, stepLabel(tool, payload.tool_input ?? {}));
@@ -195,9 +233,11 @@ function handleHook(island: Island, payload: HookPayload) {
       break;
     }
 
-    case "Stop":
+    case "Stop": {
       State.updateTask(CLAUDE_ID, "finished");
-      if (payload.message) State.appendStep(CLAUDE_ID, payload.message.slice(0, 60));
+      const finalMessage = payload.message ?? payload.last_assistant_message;
+      saveCompletedHandoff(payload, cwd, finalMessage ?? "");
+      if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));
       Sound.play("finish");
       if (focused) surface("finished", true);
       else State.setPillBadge(CLAUDE_ID, "finished");
@@ -205,6 +245,37 @@ function handleHook(island: Island, payload: HookPayload) {
         State.updateTask(CLAUDE_ID, "idle");
         State.setPillBadge(CLAUDE_ID, null);
       }, 5200);
+      break;
+    }
+
+    case "CodexTurnComplete": {
+      if (payload.turn_id) {
+        const completionKey = `${payload.session_id ?? ""}:${payload.turn_id}`;
+        if (completedCodexTurns.has(completionKey)) break;
+        completedCodexTurns.add(completionKey);
+        if (completedCodexTurns.size > 128) {
+          const oldest = completedCodexTurns.values().next().value;
+          if (oldest) completedCodexTurns.delete(oldest);
+        }
+      }
+      upsert(projectName, cwd, "codex");
+      State.updateTask(CLAUDE_ID, "finished");
+      const finalMessage = payload.last_assistant_message;
+      saveCompletedHandoff(payload, cwd, finalMessage ?? "");
+      if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));
+      Sound.play("finish");
+      island.alert("finished");
+      window.setTimeout(() => {
+        State.updateTask(CLAUDE_ID, "idle");
+        State.setPillBadge(CLAUDE_ID, null);
+      }, 5200);
+      break;
+    }
+
+    case "CodexSessionStarted":
+      upsert(projectName, cwd, "codex");
+      State.updateTask(CLAUDE_ID, "thinking");
+      surface("overview", false);
       break;
 
     case "StopFailure":
@@ -236,7 +307,7 @@ function handleHook(island: Island, payload: HookPayload) {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      upsert(projectName, cwd);
+      upsert(projectName, cwd, payload.agent_source === "codex" ? "codex" : "claudeCode");
       if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};

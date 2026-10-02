@@ -1,12 +1,18 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod claude;
+mod codex;
+mod codex_watch;
 mod files;
 mod hooks;
+mod hub;
+mod hub_events;
 mod integrations;
 mod island;
 mod log;
 mod pipe;
+mod project_status;
+mod project_search;
 mod secrets;
 mod settings;
 mod tray;
@@ -20,6 +26,9 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::{ManagerExt, MacosLauncher};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::Shell::{NIF_ICON, NIF_INFO, NIF_STATE, NIF_TIP, NIM_ADD, NIM_MODIFY, NIIF_INFO, NIS_HIDDEN, NOTIFYICONDATAW, Shell_NotifyIconW};
+use windows::Win32::UI::WindowsAndMessaging::{IDI_INFORMATION, LoadIconW};
 
 use claude::{Chat, ChatContext, ChatReply};
 use files::DroppedFile;
@@ -243,13 +252,42 @@ fn approval_decline(app: AppHandle, request_id: String) {
 /// One chat turn. The API key and any file bytes stay on the Rust side.
 #[tauri::command]
 async fn chat_send(
-    shared: State<'_, Shared>,
     chat: State<'_, Chat>,
     query: String,
     context: Option<ChatContext>,
+    cwd: Option<String>,
 ) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    codex::send(&chat, query, context, cwd).await
+}
+
+#[tauri::command]
+async fn project_status(cwd: String) -> Result<project_status::ProjectStatus, String> {
+    project_status::load(cwd).await
+}
+
+#[tauri::command]
+async fn project_status_local(cwd: String) -> Result<project_status::ProjectStatus, String> {
+    project_status::load_local(cwd).await
+}
+
+#[tauri::command]
+fn search_local_projects(projects: Vec<project_search::SearchProject>, query: String) -> Result<Vec<project_search::SearchHit>, String> {
+    project_search::search(projects, query)
+}
+
+#[tauri::command]
+fn open_project_file(path: String, line: usize) -> bool {
+    project_search::open_file(path, line)
+}
+
+#[tauri::command]
+async fn hub_repositories() -> Result<hub::GitHubCatalog, String> {
+    hub::repositories().await
+}
+
+#[tauri::command]
+async fn hub_work_queue() -> Result<hub::GitHubWorkQueue, String> {
+    hub::work_queue().await
 }
 
 #[tauri::command]
@@ -320,6 +358,16 @@ fn settings_page_url(app: &AppHandle) -> WebviewUrl {
     WebviewUrl::App("settings.html".into())
 }
 
+fn hub_page_url(app: &AppHandle) -> WebviewUrl {
+    #[cfg(dev)]
+    if let Some(mut base) = app.config().build.dev_url.clone() {
+        base.set_path("/hub.html");
+        return WebviewUrl::External(base);
+    }
+    let _ = app;
+    WebviewUrl::App("hub.html".into())
+}
+
 /// The settings window is created hidden at launch and only ever shown and
 /// hidden afterwards. A WebView2 window created later — on the main thread or
 /// not — silently comes up blank in this app, so the window that works is the
@@ -348,6 +396,85 @@ fn create_settings_window(app: &AppHandle) {
         }
         Err(err) => log::line(format!("settings window failed: {err}")),
     }
+}
+
+fn create_hub_window(app: &AppHandle) {
+    match WebviewWindowBuilder::new(app, "hub", hub_page_url(app))
+        .additional_browser_args(BROWSER_ARGS)
+        .title("Coucou Hub")
+        .inner_size(1120.0, 780.0)
+        .min_inner_size(900.0, 620.0)
+        .resizable(true)
+        .visible(false)
+        .center()
+        .build()
+    {
+        Ok(win) => {
+            let hidden = win.clone();
+            win.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = hidden.hide();
+                }
+            });
+        }
+        Err(err) => log::line(format!("hub window failed: {err}")),
+    }
+}
+
+fn show_hub_window(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("hub") else {
+        log::line("hub window missing");
+        return;
+    };
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
+#[tauri::command]
+fn open_hub_window(app: AppHandle) {
+    show_hub_window(&app);
+}
+
+fn copy_wide<const N: usize>(output: &mut [u16; N], value: &str) {
+    let mut cursor = 0;
+    for character in value.chars() {
+        let mut encoded = [0u16; 2];
+        let units = character.encode_utf16(&mut encoded);
+        if cursor + units.len() >= N { break; }
+        output[cursor..cursor + units.len()].copy_from_slice(units);
+        cursor += units.len();
+    }
+}
+
+#[tauri::command]
+fn show_plan_notification(app: AppHandle, title: String, body: String) -> bool {
+    let Some(window) = app.get_webview_window("hub") else { return false };
+    let Ok(native_handle) = window.hwnd() else { return false };
+    let mut data = NOTIFYICONDATAW::default();
+    data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+    data.hWnd = HWND(native_handle.0 as *mut _);
+    data.uID = 0xC0C0;
+    data.uFlags = NIF_ICON | NIF_TIP;
+    data.hIcon = unsafe { LoadIconW(None, IDI_INFORMATION) }.unwrap_or_default();
+    copy_wide(&mut data.szTip, "Coucou reminders");
+
+    // The Hub window stays alive while hidden; a hidden notification icon lets
+    // Windows deliver native reminder balloons without adding a second tray icon.
+    let added = unsafe { Shell_NotifyIconW(NIM_ADD, &data) }.as_bool();
+    if added {
+        data.uFlags = NIF_STATE;
+        data.dwState = NIS_HIDDEN;
+        data.dwStateMask = NIS_HIDDEN;
+        let _ = unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+    }
+
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    copy_wide(&mut data.szInfoTitle, &title);
+    copy_wide(&mut data.szInfo, &body);
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) }.as_bool()
 }
 
 pub fn show_settings_window(app: &AppHandle) {
@@ -398,6 +525,14 @@ pub fn run() {
             approval_decline,
             log_line,
             chat_send,
+            project_status,
+            project_status_local,
+            search_local_projects,
+            open_project_file,
+            hub_repositories,
+            hub_work_queue,
+            open_hub_window,
+            show_plan_notification,
             chat_reset,
             ingest_file,
             secret_present,
@@ -413,6 +548,7 @@ pub fn run() {
             tray::build(&handle)?;
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
+            create_hub_window(&handle);
 
             if let Some(win) = island::window(&handle) {
                 island::make_non_activating(&win);
@@ -426,6 +562,7 @@ pub fn run() {
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
+            codex_watch::start(handle.clone());
             integrations::start(handle.clone());
             Ok(())
         })

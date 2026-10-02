@@ -12,7 +12,7 @@ import { ICONS } from "./icons";
 import { cubicBezier, clamp, lerp } from "../core/anim";
 import type { AgentTask } from "../core/state";
 
-const ROW_H = 22;
+const ROW_H = 26;
 /** One step transition, milliseconds. */
 const DURATION = 380;
 /** Beyond this many queued steps we stop trying to show them all. */
@@ -35,10 +35,11 @@ function makeRow(): Row {
   check.style.color = "#454850"; // the completed tick is dimmer than the chevron
   check.style.position = "absolute";
   chevron.style.position = "absolute";
-  const shimmer = h("span", { class: "tick-text shimmer" });
+  const shimmer = h("span", { class: "tick-text shimmer", dir: "auto" });
   const dim = h("span", {
     class: "tick-text",
-    style: "position:absolute;left:0;right:0;color:#6b7079",
+    dir: "auto",
+    style: "position:absolute;left:0;right:0;color:#a2a8b4",
   });
   const el = h(
     "div",
@@ -98,6 +99,8 @@ export class Ticker {
   sync(task: AgentTask | null) {
     const steps = task && task.steps.length > 0 ? task.steps : ["…"];
     const idx = task ? Math.min(task.stepIndex, steps.length - 1) : -1;
+    this.el.title = steps[Math.max(idx, 0)] ?? "";
+    this.el.setAttribute("aria-label", this.el.title);
 
     // First render: drop straight into place, no animation.
     if (this.displayIndex < 0) {

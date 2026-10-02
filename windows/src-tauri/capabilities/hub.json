@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hub",
+  "description": "Hub window permissions for events and desktop reminders.",
+  "windows": ["hub"],
+  "permissions": ["core:default"]
+}

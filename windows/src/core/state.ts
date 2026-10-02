@@ -3,7 +3,7 @@
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 
-export type AgentSource = "claudeCode" | "n8n";
+export type AgentSource = "claudeCode" | "codex" | "n8n";
 export type PillBadge = "approval" | "finished" | "error";
 
 export interface AgentTask {
@@ -136,7 +136,10 @@ class AppState {
   noteMessage: string | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
+  suggestedPrompt: string | null = null;
   pendingApproval: ApprovalInfo | null = null;
+  /** Last local project directory reported by a Claude/Codex session in VS Code. */
+  activeProjectCwd: string | null = null;
 
   integrations: Record<string, IntegrationInfo> = {};
 

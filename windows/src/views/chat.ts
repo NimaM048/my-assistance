@@ -75,7 +75,7 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
       State.chatHistory.length === 1 && file ? { kind: "file", name: file.name, path: file.path } : null;
 
     try {
-      const reply = await Bridge.chatSend(query, context);
+      const reply = await Bridge.chatSend(query, context, State.activeProjectCwd);
       State.chatHistory.push({ id: nextId++, role: "assistant", content: reply.text });
       State.stateOverride = null;
       Sound.play("finish");
@@ -104,6 +104,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   return {
     el,
     sync() {
+      if (State.view === "prompt" && State.suggestedPrompt) {
+        input.value = State.suggestedPrompt;
+        State.suggestedPrompt = null;
+        input.focus();
+      }
       const file = State.droppedFile;
       const wantChip = file?.name ?? "";
       if (chipRow.dataset.label !== wantChip) {

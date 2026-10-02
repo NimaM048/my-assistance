@@ -6,6 +6,8 @@ import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
 import { State, type AgentTask } from "../core/state";
+import { Bridge, type ProjectStatus } from "../core/bridge";
+import { captureHandoff, handoffPrompt, latestHandoff, saveNextStep } from "../core/handoff";
 import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { buildPrompt } from "./chat";
@@ -79,10 +81,12 @@ function stack(padLeft: number, padRight: number, ...children: Node[]): HTMLElem
 
 export function buildHeader(actions: ViewActions): ViewHost {
   const tabHome = h("button", { class: "tab", title: "Overview", onclick: () => go("overview") }, svg(ICONS.house, 13));
+  const tabProject = h("button", { class: "tab", title: "Project status", onclick: () => go("project") }, svg(ICONS.branch, 13));
   const tabChat = h("button", { class: "tab", title: "Ask", onclick: () => go("prompt") }, svg(ICONS.bubble, 13));
   const tabDrop = h("button", { class: "tab", title: "Drop", onclick: () => go("upload") }, svg(ICONS.plus, 13));
 
   const gearBtn = h("button", { title: "Settings", onclick: () => go("settings") }, svg(ICONS.gear, 14));
+  const hubBtn = h("button", { title: "Open Coucou Hub", onclick: () => void Bridge.openHubWindow() }, svg(ICONS.grid, 14));
   const soundBtn = h("button", { title: "Mute", onclick: () => actions.toggleSound() }, svg(ICONS.speakerOn, 14));
 
   function go(v: IslandViewName) {
@@ -93,8 +97,8 @@ export function buildHeader(actions: ViewActions): ViewHost {
   const el = h(
     "div",
     { id: "header" },
-    h("div", { class: "tabs" }, tabHome, tabChat, tabDrop),
-    h("div", { class: "header-actions" }, gearBtn, soundBtn),
+    h("div", { class: "tabs" }, tabHome, tabProject, tabChat, tabDrop),
+    h("div", { class: "header-actions" }, hubBtn, gearBtn, soundBtn),
   );
 
   return {
@@ -102,6 +106,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     sync() {
       const v = State.view;
       tabHome.classList.toggle("on", v === "overview" || v === "empty");
+      tabProject.classList.toggle("on", v === "project");
       tabChat.classList.toggle("on", v === "prompt");
       tabDrop.classList.toggle("on", v === "upload");
       gearBtn.classList.toggle("on", v === "settings");
@@ -124,11 +129,16 @@ function buildOverview(actions: ViewActions): ViewHost {
   const jump = h(
     "button",
     { class: "icon-btn jump", title: "Open", onclick: () => actions.openTarget() },
-    svg(ICONS.arrowUpRight, 8),
+    svg(ICONS.arrowUpRight, 12),
   );
   const left = card(null, leftBody, jump);
   const pills = h("div", { class: "pills" });
-  const right = card(null, pills);
+  const serviceHeading = h("div", { class: "service-heading" },
+    h("span", { class: "service-title", text: "Connected tools" }),
+    h("span", { class: "service-caption", text: "Quick access" }),
+  );
+  const serviceBody = h("div", { class: "service-body" }, serviceHeading, pills);
+  const right = card(null, serviceBody);
 
   const el = h("div", { class: "view overview" },
     h("div", { class: "left" }, left),
@@ -188,12 +198,20 @@ function buildOverview(actions: ViewActions): ViewHost {
         who.append(
           dot(task.color, 7),
           h("span", { class: "name", text: task.name }),
-          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : "n8n" }),
+          h("span", { class: "tool", text: task.source === "claudeCode" ? "Claude Code" : task.source === "codex" ? "Codex" : "n8n" }),
         );
+        const statusLabels: Record<string, string> = {
+          working: "Working", thinking: "Thinking", searching: "Searching", finished: "Finished",
+          approval: "Needs approval", question: "Needs an answer", error: "Error",
+        };
+        if (statusLabels[task.state]) {
+          who.append(h("span", { class: `home-state ${task.state}`, text: statusLabels[task.state] }));
+        }
         if (task.steps.length > 1) {
           who.append(h("span", {
             class: "count",
-            text: `${Math.min(task.stepIndex + 1, task.steps.length)}/${task.steps.length}`,
+            text: `${Math.min(task.stepIndex + 1, task.steps.length)} / ${task.steps.length}`,
+            title: `Step ${Math.min(task.stepIndex + 1, task.steps.length)} of ${task.steps.length}`,
           }));
         }
         ticker.sync(task);
@@ -231,10 +249,17 @@ function buildPill(task: AgentTask, actions: ViewActions): HTMLElement {
   const canvas = createMiniBot(task, 24);
   const pill = h(
     "div",
-    { class: "pill", onclick: () => actions.setFocus(task.id) },
+    { class: "pill", role: "button", tabindex: "0", title: `Open ${label}`, "aria-label": `Open ${label}`, onclick: () => actions.setFocus(task.id) },
     canvas,
     h("span", { class: "lbl", text: label }),
   );
+  pill.addEventListener("keydown", (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key === "Enter" || key === " ") {
+      event.preventDefault();
+      actions.setFocus(task.id);
+    }
+  });
   pill.style.borderColor = `${task.color}24`;
   pill.addEventListener("mouseenter", () => {
     pill.style.background = `${task.color}2e`;
@@ -281,7 +306,7 @@ function buildEmpty(actions: ViewActions): ViewHost {
       h("div", { class: "sub", text: "Drop a file or window, or ask me anything." }),
     ),
     h("div", { class: "grow" }),
-    btn("Ask Claude", "primary", () => actions.setView("prompt")),
+    btn("Ask Codex", "primary", () => actions.setView("prompt")),
   );
   return { el: h("div", { class: "view" }, card(null, body)), sync() {} };
 }
@@ -353,8 +378,8 @@ function buildError(actions: ViewActions): ViewHost {
     sync() {
       const task = State.focusTask;
       clear(who);
-      who.append(agentWho(task, task?.source === "n8n" ? "n8n" : "Claude Code"));
-      title.textContent = task?.source === "n8n" ? "Workflow stopped." : "Session stopped on an error.";
+      who.append(agentWho(task, task?.source === "n8n" ? "n8n" : task?.source === "codex" ? "Codex" : "Claude Code"));
+      title.textContent = task?.source === "n8n" ? "Workflow stopped." : task?.source === "codex" ? "Codex turn stopped on an error." : "Session stopped on an error.";
       detail.textContent = task?.steps.at(-1) ?? "No detail available.";
     },
   };
@@ -439,7 +464,7 @@ function buildSettings(actions: ViewActions): ViewHost {
       h("div", { class: "grow" }),
       h("button", {
         class: "link-btn",
-        style: "color:#8e939c;font-size:11.5px",
+        style: "color:#8e939c;font-size:12.5px",
         text: "Settings…",
         onclick: () => actions.openSettingsWindow(),
       }),
@@ -471,6 +496,156 @@ function buildSettings(actions: ViewActions): ViewHost {
 
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
+function buildProject(actions: ViewActions): ViewHost {
+  const body = h("div", { class: "project-body" });
+  const projectCard = card(null, body);
+  projectCard.classList.add("project-card");
+  const el = h("div", { class: "view project-view" }, projectCard);
+  let path = "";
+  let status: ProjectStatus | null = null;
+  let loading = false;
+  let error = "";
+  let rendered = "";
+
+  async function refresh(cwd: string) {
+    loading = true;
+    error = "";
+    State.notify();
+    try {
+      status = await Bridge.projectStatus(cwd);
+      error = status?.error ?? "";
+    } catch (e) {
+      error = String(e).replace(/^Error:\\s*/, "");
+      status = null;
+    } finally {
+      loading = false;
+      rendered = "";
+      State.notify();
+    }
+  }
+
+  function render(cwd: string) {
+    const task = State.tasks.find((item) => item.source === "codex" || item.id === "integration_claude");
+    const handoff = latestHandoff(status?.path || cwd);
+    const key = JSON.stringify([cwd, loading, error, status, task?.state, task?.steps.at(-1), handoff]);
+    if (key === rendered) return;
+    rendered = key;
+    clear(body);
+    const title = status?.projectName || cwd.split(/[\\/]/).filter(Boolean).at(-1) || "Project";
+    const activity = dot(task?.state === "working" || task?.state === "thinking" ? "#3B9EFF" : "#22C55E", 6);
+    activity.classList.add("project-dot");
+    if (task?.state === "working" || task?.state === "thinking") activity.classList.add("is-working");
+    body.append(h("div", { class: "project-heading" },
+      activity,
+      h("b", { text: title, class: "project-title" }),
+      h("span", { text: loading ? "Updating" : task?.state === "working" || task?.state === "thinking" ? "Codex working" : "Project status", class: "project-live" }),
+      cwd ? h("button", { class: "project-refresh", title: "Refresh status", "aria-label": "Refresh project status", onclick: () => void refresh(cwd) }, svg(ICONS.refresh, 12)) : null,
+    ));
+    if (!cwd) {
+      body.append(h("div", { class: "sub", text: "Open a project in VS Code and start a Codex prompt to see its status." }));
+    } else if (loading && !status) {
+      body.append(h("div", { class: "project-loading", style: "width:42%" }));
+      body.append(h("div", { class: "project-loading", style: "width:76%" }));
+      body.append(h("div", { class: "project-loading", style: "width:58%" }));
+      body.append(h("div", { class: "sub", text: "Reading local Git and GitHub status…" }));
+    } else if (error || status?.error) {
+      body.append(h("div", { class: "sub", text: error || status?.error || "Could not read project status." }));
+    } else if (status) {
+      const row = (label: string, value: string, icon?: string) => h("div", { class: "project-row" },
+        h("span", { class: "project-label" }, icon ? svg(icon, 11) : null, h("span", { text: label })),
+        h("span", { class: "project-value", text: value }));
+      const repoUrl = status.githubRepo ? `https://github.com/${status.githubRepo}` : null;
+      body.append(row("Branch", status.branch || "Detached HEAD", ICONS.branch));
+      body.append(h("div", { class: "project-row" },
+        h("span", { class: "project-label" }, svg(ICONS.doc, 11), h("span", { text: "Changes" })),
+        h("span", { class: "project-chips" },
+          h("span", { class: "project-chip", text: `${status.changedFiles} files` }),
+          h("span", { class: "project-chip staged", text: `${status.stagedFiles} staged` }),
+          h("span", { class: "project-chip dirty", text: `${status.unstagedFiles + status.untrackedFiles} pending` }),
+        ),
+      ));
+      if (status.lastCommit) body.append(row("Last commit", status.lastCommit, ICONS.check));
+      body.append(h("div", { class: "project-row" },
+        h("span", { class: "project-label" }, svg(ICONS.stack, 11), h("span", { text: "GitHub" })),
+        repoUrl
+          ? h("button", { class: "project-repo", title: status.githubRepo ?? "", text: status.githubRepo ?? "", onclick: () => void Bridge.openUrl(repoUrl) })
+          : h("span", { class: "project-value", text: "No GitHub remote" }),
+      ));
+      const items = [...status.issues.map((item) => ({ ...item, kind: "Issue" })), ...status.pullRequests.map((item) => ({ ...item, kind: "PR" }))].slice(0, 3);
+      for (const item of items) body.append(h("button", {
+        class: "project-issue",
+        title: `${item.kind} #${item.number} · ${item.title}`,
+        onclick: () => void Bridge.openUrl(item.url),
+      },
+        h("span", { class: `issue-kind ${item.kind === "PR" ? "pr" : ""}`, text: item.kind }),
+        h("span", { class: "issue-number", text: `#${item.number}` }),
+        h("span", { class: "issue-title", text: item.title }),
+      ));
+      if (status.githubError) body.append(h("div", { class: "sub", text: status.githubError, style: "font-size:11.5px" }));
+      if (!status.githubError && items.length === 0 && status.githubRepo) body.append(h("div", { class: "sub", text: "No open issues or pull requests." }));
+    }
+    if (!handoff && cwd && status && !status.error) body.append(h("button", { class: "handoff-empty", onclick: () => {
+      void captureHandoff(cwd).then(() => { rendered = ""; State.notify(); });
+    } }, svg(ICONS.doc, 13), h("span", {}, h("b", { text: "Save a handoff" }), h("small", { text: "Keep this project state and add a next step for later." })), svg(ICONS.arrowUpRight, 11)));
+    if (handoff) {
+      const handoffMeta = [handoff.branch || "Detached HEAD", `${handoff.changedFiles} changed`].join(" · ");
+      const promptLine = handoff.prompt ? `Last request · ${handoff.prompt.replace(/\s+/g, " ").slice(0, 92)}${handoff.prompt.length > 92 ? "…" : ""}` : "Saved project state is ready to resume.";
+      const nextInput = h("input", { class: "handoff-next-input", type: "text", maxlength: "300", value: handoff.nextStep, "aria-label": "Next step", placeholder: "What should happen next?" }) as HTMLInputElement;
+      let saveButton: HTMLElement | null = null;
+      const saveStep = () => {
+        const nextStep = nextInput.value.trim();
+        if (nextStep && saveNextStep(handoff.id, nextStep)) {
+          handoff.nextStep = nextStep;
+          nextInput.value = nextStep;
+          nextInput.blur();
+          saveButton?.classList.add("saved");
+          window.setTimeout(() => saveButton?.classList.remove("saved"), 900);
+        }
+      };
+      nextInput.addEventListener("keydown", (event) => { if ((event as KeyboardEvent).key === "Enter") saveStep(); });
+      const resume = h("button", { class: "handoff-resume", onclick: () => {
+        State.suggestedPrompt = handoffPrompt(handoff);
+        actions.setView("prompt");
+      } }, svg(ICONS.arrowUpRight, 11), "Resume");
+      saveButton = h("button", { class: "handoff-save", title: "Save next step", "aria-label": "Save next step", onclick: saveStep }, svg(ICONS.check, 12));
+      body.append(h("section", { class: "handoff-card" },
+        h("div", { class: "handoff-heading" }, h("div", {}, h("b", { text: "Session handoff" }), h("span", { text: new Date(handoff.createdAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) })), resume),
+        h("div", { class: "handoff-meta", text: handoffMeta }),
+        h("div", { class: "handoff-prompt", title: handoff.prompt, text: promptLine }),
+        h("div", { class: "handoff-next" }, nextInput, saveButton),
+      ));
+    }
+    const buttons = h("div", { class: "project-actions" });
+    buttons.append(h("button", { class: "project-action hub-open", onclick: () => void Bridge.openHubWindow() }, svg(ICONS.grid, 11), "Open Coucou Hub"));
+    if (cwd) buttons.append(h("button", { class: "project-action subtle", text: "Open in VS Code", onclick: () => void Bridge.openInVSCode(cwd) }));
+    if (cwd && status?.githubRepo) buttons.append(h("button", { class: "project-action subtle", text: "Open GitHub", onclick: () => void Bridge.openUrl(`https://github.com/${status?.githubRepo}`) }));
+    if (cwd && status) {
+      buttons.append(h("button", { class: "project-action", text: "Summarize changes", onclick: () => {
+        State.suggestedPrompt = "Summarize the current project's uncommitted changes. Explain the purpose of each change briefly.";
+        actions.setView("prompt");
+      } }));
+      buttons.append(h("button", { class: "project-action", text: "Review my diff", onclick: () => {
+        State.suggestedPrompt = "Review my current uncommitted Git diff. Look for bugs, regressions, and missing edge cases. Do not modify files.";
+        actions.setView("prompt");
+      } }));
+    }
+    body.append(buttons);
+  }
+
+  return {
+    el,
+    sync() {
+      const cwd = State.activeProjectCwd ?? "";
+      if (cwd !== path) {
+        path = cwd;
+        status = null;
+        if (cwd) void refresh(cwd);
+      }
+      render(cwd);
+    },
+  };
+}
+
 function buildPlaceholder(title: string, sub: string): ViewHost {
   const body = h(
     "div",
@@ -497,6 +672,7 @@ export function buildViews(
   map.set("confused", buildConfused());
   map.set("note", buildNote());
   map.set("settings", buildSettings(actions));
+  map.set("project", buildProject(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

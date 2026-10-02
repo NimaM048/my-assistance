@@ -286,6 +286,7 @@ async fn poll_github(app: AppHandle) {
         return;
     }
     let json: Value = response.json().await.unwrap_or(json!({}));
+    let login = json.get("login").and_then(Value::as_str).unwrap_or_default();
     let public = json.get("public_repos").and_then(Value::as_i64).unwrap_or(0);
     let private = json
         .get("owned_private_repos")
@@ -300,24 +301,38 @@ async fn poll_github(app: AppHandle) {
         .header("User-Agent", "Coucou")
         .send()
         .await;
-    let stars: i64 = match repos {
-        Ok(r) if r.status().is_success() => r
+    let repository_data = match repos {
+        Ok(response) if response.status().is_success() => response
             .json::<Value>()
             .await
             .ok()
-            .and_then(|v| v.as_array().cloned())
-            .map(|list| {
-                list.iter()
-                    .filter_map(|r| r.get("stargazers_count").and_then(Value::as_i64))
-                    .sum()
-            })
-            .unwrap_or(0),
-        _ => 0,
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default(),
+        _ => Vec::new(),
     };
+    let stars: i64 = repository_data
+        .iter()
+        .filter_map(|repo| repo.get("stargazers_count").and_then(Value::as_i64))
+        .sum();
+    let repositories: Vec<Value> = repository_data
+        .iter()
+        .take(5)
+        .map(|repo| json!({
+            "name": repo.get("name").and_then(Value::as_str).unwrap_or_default(),
+            "language": repo.get("language").and_then(Value::as_str).unwrap_or_default(),
+            "stars": repo.get("stargazers_count").and_then(Value::as_i64).unwrap_or(0),
+            "url": repo.get("html_url").and_then(Value::as_str).unwrap_or_default(),
+        }))
+        .collect();
 
     emit(&app, IntegrationUpdate {
         id: "integration_github",
-        data: json!({ "totalRepos": public + private, "totalStars": stars }),
+        data: json!({
+            "login": login,
+            "totalRepos": public + private,
+            "totalStars": stars,
+            "repositories": repositories,
+        }),
         error: None,
         event: None,
     });

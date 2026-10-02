@@ -215,17 +215,30 @@ function githubCard(): HTMLElement {
   const d = get("integration_github");
   const stars = Number(d.totalStars ?? 0);
   const repos = Number(d.totalRepos ?? 0);
+  const recent = arr("integration_github", "repositories");
   const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   return h(
     "div",
     { class: "int-card" },
-    header("#F4505E", "GitHub", "Overview"),
+    header("#F4505E", "GitHub", String(d.login || "Overview")),
     h(
       "div",
       { class: "int-stats" },
       statRow(ICONS.star, "#F5A524", "Total stars", fmt(stars)),
       statRow(ICONS.stack, "#6B7079", "Repositories", String(repos)),
     ),
+    recent.length
+      ? h(
+          "div",
+          { class: "int-rows tight" },
+          ...recent.map((repo, index) => listRow(
+            "#F4505E",
+            index === 0,
+            h("span", { class: "int-name", title: String(repo.name ?? ""), text: String(repo.name ?? "Repository") }),
+            h("span", { class: "int-ago", text: `★ ${Number(repo.stars ?? 0)}` }),
+          )),
+        )
+      : null,
   );
 }
 

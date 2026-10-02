@@ -7,6 +7,8 @@
 import { Ease, lerp, type EaseFn } from "../core/anim";
 import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
+import { drawOutfitBack, drawOutfitFront, phonesColorsFor, type EyeSpot, type OutfitGeom } from "./accessories";
+import type { Outfit } from "./growth";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -244,6 +246,8 @@ export class BotEngine {
   /** Headphones on (1) or off (0) — Mochi puts them on when music plays. */
   phones = 0;
   phonesColors: [string, string] = ["#ff8fab", "#ffd166"];
+  /** What Mochi is wearing (see growth.ts / accessories.ts). Minis never dress up. */
+  outfit: Outfit = {};
 
   // Dancing to the music. `grooveTarget` and `beatPos` are fed by the owner
   // every frame; the offsets below are added on top of everything else, so
@@ -988,6 +992,10 @@ export class BotEngine {
     if (tilt !== 0) x.rotate(tilt);
     x.scale(this.sx * (1 + this.gSq * 0.6), this.sy * (1 - this.gSq));
 
+    const dressed = !this.isMini && this.morph < 0.3 && Object.keys(this.outfit).length > 0;
+    const geom = dressed ? this.outfitGeom(R, rx, ry) : null;
+    if (geom) drawOutfitBack(x, this.outfit, geom);
+
     const body = this.bodyPath(rx, ry, R);
     this.drawBody(x, body, R, rx, ry);
 
@@ -1009,6 +1017,7 @@ export class BotEngine {
     if (this.mouthS > 0.02 && this.mouthDrawn !== "none") this.drawFaceMouth(x, body, R, rx, ry);
     if (this.morph > 0.05) this.drawMouth(x, body, R);
     if (this.phones > 0.01 && !this.isMini) this.drawPhones(x, R, rx, ry);
+    if (geom) drawOutfitFront(x, this.outfit, geom);
 
     x.restore();
 
@@ -1264,6 +1273,22 @@ export class BotEngine {
     }
   }
 
+  /** Where the eyes sit right now — glasses and monocles follow them. */
+  private outfitGeom(R: number, rx: number, ry: number): OutfitGeom {
+    const spot = (sd: number): EyeSpot => {
+      const eyeYaw = sd * EYE_SP + this.yaw;
+      const eyePitch = EYE_P + this.pitch;
+      const cp = Math.cos(eyePitch);
+      return {
+        x: Math.sin(eyeYaw) * cp * rx,
+        y: -Math.sin(eyePitch) * ry,
+        fx: Math.max(0.18, Math.cos(eyeYaw)),
+        visible: Math.cos(eyeYaw) * cp > 0.04,
+      };
+    };
+    return { R, rx, ry, yaw: this.yaw, eyes: [spot(-1), spot(1)], t: now() };
+  }
+
   /** Big cosy headphones: a band over the head and two cups at the sides. */
   private drawPhones(x: CanvasRenderingContext2D, R: number, rx: number, ry: number) {
     const k = Math.min(1, this.phones);
@@ -1284,7 +1309,7 @@ export class BotEngine {
     x.ellipse(0, -ry * 0.1, rx * 1.04, ry * 1.08, 0, Math.PI * 1.2, Math.PI * 1.55);
     x.stroke();
 
-    const [c0, c1] = this.phonesColors;
+    const [c0, c1] = phonesColorsFor(this.outfit.phones, this.phonesColors, now());
     for (const sd of [-1, 1]) {
       const px = sd * rx * 1.0;
       const py = -ry * 0.02;

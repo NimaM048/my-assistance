@@ -12,6 +12,7 @@
 import { emitLocal } from "../core/bridge";
 import type { BotEmoteName, BotStateName, IslandViewName } from "../core/layout";
 import { State } from "../core/state";
+import { awardXp, growthStore, randomOutfit } from "../mochi/growth";
 import type { Island } from "../island/island";
 
 const CWD = "C:\\code\\my-assistance";
@@ -183,6 +184,12 @@ export function mountPlayground(island: Island) {
       ["Jingle ✓", () => emitLocal("music-command", { action: "jingle", kind: "finish" })],
       ["Jingle ✗", () => emitLocal("music-command", { action: "jingle", kind: "error" })],
     ], "A running session plays work music on its own (Settings → Music in the Hub to change it)."),
+    group("Mochi grows", [
+      ["+50 XP", () => awardXp(50, "task")],
+      ["+400 XP", () => awardXp(400, "focus")],
+      ["Random outfit", () => growthStore.write({ equipped: randomOutfit() })],
+      ["Reset growth", () => growthStore.write({ xp: 0, equipped: { hat: "sprout" }, rewarded: [], log: [], celebratedLevel: 1 })],
+    ], "Outfits and level-ups are shared with the Hub (open hub.html in another tab)."),
     group("Integrations", [
       ["Vercel ✓", () => integration("integration_vercel", true)],
       ["Vercel ✗", () => integration("integration_vercel", false)],

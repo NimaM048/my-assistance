@@ -8,6 +8,10 @@ import { captureHandoff } from "../core/handoff";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
+import { XP, awardXp } from "../mochi/growth";
+
+/** A finished agent session earns Mochi a little XP (capped per day). */
+const rewardAgent = () => awardXp(XP.agentSession, "agent", { capGroup: "agent", dailyCap: XP.agentDailyCap });
 
 const CLAUDE_ID = "integration_claude";
 
@@ -235,6 +239,7 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "Stop": {
       State.updateTask(CLAUDE_ID, "finished");
+      rewardAgent();
       const finalMessage = payload.message ?? payload.last_assistant_message;
       saveCompletedHandoff(payload, cwd, finalMessage ?? "");
       if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));
@@ -260,6 +265,7 @@ function handleHook(island: Island, payload: HookPayload) {
       }
       upsert(projectName, cwd, "codex");
       State.updateTask(CLAUDE_ID, "finished");
+      rewardAgent();
       const finalMessage = payload.last_assistant_message;
       saveCompletedHandoff(payload, cwd, finalMessage ?? "");
       if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));

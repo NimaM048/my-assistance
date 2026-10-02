@@ -16,6 +16,7 @@ import { Greeting } from "../mochi/greeting";
 import { createMiniBot, pruneMiniBots, setMiniGroove, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
 import type { MusicHost } from "../music/host";
 import { stationById } from "../music/stations";
+import { ITEMS, growthStore, levelInfo, wornOutfit } from "../mochi/growth";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -43,6 +44,11 @@ const UPLOAD_VIEWS: ReadonlySet<IslandViewName> = new Set(["upload", "uploading"
 
 /** Seconds between the drop and the moment the progress bar starts filling. */
 const PRE_PROGRESS = USC.T_PROG_START - USC.T_DROP;
+
+/** "🥳 Party hat, 👓 Round glasses" — the items a level-up just unlocked. */
+function unlockedBetween(from: number, to: number): string {
+  return ITEMS.filter((i) => i.level > from && i.level <= to).map((i) => `${i.emoji} ${i.name}`).join(", ");
+}
 
 const modeOrder = (m: IslandMode) => (m === "hidden" ? 0 : m === "compact" ? 1 : 2);
 
@@ -127,6 +133,7 @@ export class Island {
     this.wireFsm();
     this.wireInput();
     this.engine.onDizzy = () => this.handleDizzy();
+    this.wireGrowth();
     this.greeting.onComplete = () => this.fsm.greetComplete();
     State.subscribe(() => {
       this.dirty = true;
@@ -339,6 +346,34 @@ export class Island {
     if (!calm || busyView || this.engine.emoting || this.botHovering) return;
     this.engine.triggerEmote(pickFidget(new Date().getHours()));
     this.ensureRunning();
+  }
+
+  // ── Growth ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Mochi wears whatever you picked in the Hub's wardrobe, and throws a little
+   * party right here when it levels up (XP can come from any window).
+   */
+  private wireGrowth() {
+    let level = levelInfo(growthStore.read().xp).level;
+    this.engine.outfit = wornOutfit();
+    growthStore.subscribe((s) => {
+      this.engine.outfit = wornOutfit(s);
+      const now = levelInfo(s.xp).level;
+      if (now > level) {
+        const unlocked = unlockedBetween(level, now);
+        State.noteMessage = unlocked
+          ? `Level ${now}! New in the wardrobe: ${unlocked}`
+          : `Level ${now}! Mochi is growing up.`;
+        this.alert("note");
+        this.engine.triggerEmote("celebrate");
+        this.engine.burst("confetti", 24);
+        Sound.play("proud");
+        window.setTimeout(() => { if (State.view === "note") this.collapse(); }, 4200);
+      }
+      level = now;
+      this.ensureRunning();
+    });
   }
 
   // ── Music ───────────────────────────────────────────────────────────────────

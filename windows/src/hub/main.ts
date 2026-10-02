@@ -1,6 +1,7 @@
 import "./hub.css";
 import "./focus.css";
 import "./radio.css";
+import "./wardrobe.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
@@ -8,10 +9,12 @@ import { mochiPortrait } from "../mochi/portrait";
 import { focusKeydown, refreshFocusPage, renderFocusPage, setFocusHost, tickFocus, type FocusHost } from "./focus";
 import type { FocusData, FocusTask } from "./types";
 import { nowPlayingCard, renderRadioPage } from "./radio";
+import { renderWardrobePage, watchLevelUps, xpPop, type WardrobeHost } from "./wardrobe";
+import { growthStore, randomOutfit } from "../mochi/growth";
 import { music } from "../music/remote";
 import { STATIONS } from "../music/stations";
 
-type Page = "repositories" | "queue" | "music" | "focus" | "activity";
+type Page = "repositories" | "queue" | "music" | "focus" | "activity" | "wardrobe";
 type Filter = "all" | "public" | "private" | "pinned";
 type QueueFilter = "all" | "github" | "reviews" | "local";
 type Mood = "focus" | "energy" | "chill";
@@ -105,6 +108,8 @@ const FA_COPY: Record<string, string> = {
   "Playing while your agent works": "در حال پخش، تا ایجنتت کار می‌کند", "Playing for your focus session": "در حال پخش برای جلسهٔ تمرکزت", "Your pick": "انتخاب خودت", "Another station": "یک ایستگاه دیگر", "Volume": "صدا", "MOCHI RADIO": "رادیو موچی", "Composed live on your PC — no streaming, works offline.": "همین حالا روی کامپیوترت ساخته می‌شود — بدون استریم، حتی آفلاین.", "STATIONS": "ایستگاه‌ها", "Pick a vibe": "یک حال‌وهوا انتخاب کن", "DISCOVER": "کشف کن", "More music on YouTube Music": "موسیقی بیشتر در YouTube Music", "🎲  Surprise me": "🎲  غافلگیرم کن", "WHEN MOCHI PLAYS": "موچی کی می‌نوازد", "Music that follows your day": "موسیقی‌ای که همراه روزت است", "While your agent works": "وقتی ایجنتت کار می‌کند", "Claude Code or Codex busy? Mochi puts its headphones on and plays something cute. It turns down for questions.": "Claude Code یا Codex مشغول است؟ موچی هدفونش را می‌گذارد و یک آهنگ بامزه پخش می‌کند. موقع سؤال‌ها صدا را کم می‌کند.", "During focus sessions": "در جلسه‌های تمرکز", "Starts with your pomodoro and stops for breaks.": "با پومودورو شروع می‌شود و موقع استراحت قطع می‌شود.", "Victory jingles": "آهنگ پیروزی", "A tiny fanfare when a session finishes — and a sad trombone when it fails.": "یک جشن کوچک وقتی جلسه تمام می‌شود — و یک ترومبون غمگین وقتی شکست می‌خورد.", "Stop the music": "قطع موسیقی", "Open Mochi Radio": "باز کردن رادیو موچی", "Agent at work": "ایجنت در حال کار", "Focus session": "جلسهٔ تمرکز", "Mochi Radio": "رادیو موچی", "Mochi, DJ": "موچی، دی‌جی", "Mochi's own radio, composed live — plus new music to discover.": "رادیوی خود موچی که زنده ساخته می‌شود — به‌علاوهٔ موسیقی تازه برای کشف.", "Bouncy beats for busy agents": "ضرب‌های شاد برای ایجنت‌های پرکار", "Warm keys, dusty drums, deep focus": "پیانوی گرم، درام قدیمی، تمرکز عمیق", "Happy 8-bit adventures": "ماجراهای شاد ۸ بیتی", "Gentle bells for calm work": "زنگوله‌های آرام برای کار بی‌دغدغه", "Soft rain and slow piano": "باران نرم و پیانوی آرام",
   "Play Mochi Radio": "پخش رادیو موچی", "A random station, composed live · Ctrl Shift M": "یک ایستگاه تصادفی، زنده ساخته‌شده · Ctrl Shift M",
   "Mochi takes the headphones off · Ctrl Shift M": "موچی هدفونش را برمی‌دارد · Ctrl Shift M",
+  // Mochi's wardrobe (src/hub/wardrobe.ts, src/mochi/growth.ts)
+  "Mochi's wardrobe": "کمد لباس موچی", "Mochi grows as you work. Level up and dress it your way.": "موچی همراه کار تو بزرگ می‌شود. لِوِل بگیر و هر جور دوست داری لباسش را عوض کن.", "Surprise outfit": "لباس غافلگیرانه", "Take it all off": "همه را دربیاور", "Level": "لِوِل", "XP": "امتیاز", "total": "مجموع", "Next unlock": "باز شدن بعدی", "level": "لِوِل", "Everything unlocked — Mochi is a legend ✨": "همه‌چیز باز شده — موچی یک افسانه است ✨", "Everything": "همه", "Hats": "کلاه‌ها", "Glasses": "عینک‌ها", "Scarves & ties": "شال و پاپیون", "Headphones": "هدفون‌ها", "WARDROBE": "کمد لباس", "Dress Mochi up": "موچی را آماده کن", "Take it off": "درش بیاور", "Wear it": "بپوشانش", "Wear": "پوشیدن", "Wearing": "پوشیده", "Unlocks at a higher level": "در لِوِل بالاتر باز می‌شود", "HOW MOCHI GROWS": "موچی چطور بزرگ می‌شود", "Finish a task": "تمام کردن یک تسک", "High-priority task": "تسک با اولویت بالا", "Focus session (per minute)": "جلسهٔ تمرکز (هر دقیقه)", "Clear today's list": "تمام کردن همهٔ تسک‌های امروز", "Streak of 3, 7, 14, 30 days": "۳، ۷، ۱۴ و ۳۰ روز پیاپی", "Agent session finished": "تمام شدن یک سشن ایجنت", "RECENT XP": "امتیازهای اخیر", "Finish a task or a focus session and Mochi's first XP shows up here.": "یک تسک یا جلسهٔ تمرکز را تمام کن تا اولین امتیاز موچی اینجا بیاید.", "Task finished": "تسک تمام شد", "Cleared today's list": "همهٔ تسک‌های امروز تمام شد", "Streak milestone": "رکورد روزهای پیاپی", "Agent session done": "سشن ایجنت تمام شد", "Break game": "بازی زمان استراحت", "Took a care break": "یک استراحت مراقبتی", "LEVEL UP": "لِوِل جدید", "Mochi reached level": "موچی رسید به لِوِل", "New things in the wardrobe:": "چیزهای تازه در کمد لباس:", "Keep going — new outfits are on the way.": "ادامه بده — لباس‌های تازه در راه‌اند.", "Later": "بعداً", "Open the wardrobe": "باز کردن کمد لباس", "Level up": "لِوِل جدید", "Little sprout": "جوانهٔ کوچولو", "Party hat": "کلاه جشن", "Round glasses": "عینک گرد", "Cozy beanie": "کلاه بافتنی", "Red scarf": "شال‌گردن قرمز", "Pink bow": "پاپیون صورتی", "Bow tie": "پاپیون", "Flower crown": "تاج گل", "Midnight headphones": "هدفون نیمه‌شب", "Sunglasses": "عینک آفتابی", "Cat ears": "گوش گربه", "Mint headphones": "هدفون نعنایی", "Heart cheeks": "گونه‌های قلبی", "Bandana": "دستمال‌گردن", "Star shades": "عینک ستاره‌ای", "Gold headphones": "هدفون طلایی", "Royal crown": "تاج پادشاهی", "Pearl necklace": "گردنبند مروارید", "Monocle": "عینک تک‌چشمی", "Wizard hat": "کلاه جادوگر", "Rainbow headphones": "هدفون رنگین‌کمانی",
 };
 Object.assign(FA_COPY, {
   "Due date": "تاریخ انجام",
@@ -546,12 +551,13 @@ const queueNav = h("button", { class: "nav-button", title: "See assigned issues 
 const musicNav = h("button", { class: "nav-button", onclick: () => setPage("music") }, svg(ICONS.music, 16), h("span", { text: "Music for work" }));
 const focusNav = h("button", { class: "nav-button", onclick: () => setPage("focus") }, svg(ICONS.timer, 16), h("span", { text: "Focus & tasks" }));
 const activityNav = h("button", { class: "nav-button", onclick: () => setPage("activity") }, svg(ICONS.clock, 16), h("span", { text: "Daily history" }));
+const wardrobeNav = h("button", { class: "nav-button", onclick: () => setPage("wardrobe") }, svg(ICONS.shirt, 16), h("span", { text: "Mochi's wardrobe" }));
 const accountAvatar = h("div", { class: "avatar", text: "GH" });
 const accountName = h("b", { text: "GitHub" });
 const accountNote = h("small", { text: "Connected account" });
 const title = h("h1", { text: "Projects" });
 const subtitle = h("div", { class: "subtitle", text: "See local Git activity and open your GitHub projects." });
-const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") surpriseStation(); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
+const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") surpriseStation(); else if (page === "wardrobe") growthStore.write({ equipped: randomOutfit() }); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
 const commandButton = h("button", { class: "command-shortcut", title: "Search Coucou Hub", onclick: openCommandPalette }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl K" }));
 const projectSearchButton = h("button", { class: "command-shortcut project-search-shortcut", title: "Search local project files", onclick: openProjectSearch }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl Shift F" }));
 const languageButton = h("button", { class: "language-switch", title: "Switch language", "aria-label": "Switch language", text: hubLanguage === "en" ? "فارسی" : "English", onclick: toggleHubLanguage });
@@ -560,7 +566,7 @@ const notificationButton = h("button", { class: "notification-shortcut", title: 
 const mainContent = h("div", { class: "page-content" });
 const rootEl = h("div", { class: "hub" },
   h("aside", { class: "sidebar" }, logo,
-    h("div", { class: "nav-label", text: "Workspace" }), repoNav, queueNav, focusNav, activityNav, musicNav,
+    h("div", { class: "nav-label", text: "Workspace" }), repoNav, queueNav, focusNav, activityNav, musicNav, wardrobeNav,
     nowPlayingCard(() => setPage("music")),
     h("div", { class: "sidebar-spacer" }),
     h("div", { class: "free-note" }, h("b", { text: "Free by design" }), "Local preferences and GitHub's free API. No paid add-on."),
@@ -614,14 +620,16 @@ function setPage(next: Page) {
   musicNav.classList.toggle("active", next === "music");
   focusNav.classList.toggle("active", next === "focus");
   activityNav.classList.toggle("active", next === "activity");
-  const actionText = next === "repositories" || next === "queue" ? "Refresh" : next === "music" ? "Surprise me" : "Quick capture";
-  headerAction.replaceChildren(svg(next === "repositories" || next === "queue" ? ICONS.refresh : next === "music" ? ICONS.music : ICONS.plus, 13), document.createTextNode(actionText));
-  title.textContent = next === "repositories" ? "Projects" : next === "queue" ? "Work queue" : next === "music" ? "Music for work" : next === "activity" ? "Daily history" : "Focus & tasks";
+  wardrobeNav.classList.toggle("active", next === "wardrobe");
+  const actionText = next === "repositories" || next === "queue" ? "Refresh" : next === "music" ? "Surprise me" : next === "wardrobe" ? "Surprise outfit" : "Quick capture";
+  headerAction.replaceChildren(svg(next === "repositories" || next === "queue" ? ICONS.refresh : next === "music" ? ICONS.music : next === "wardrobe" ? ICONS.shuffle : ICONS.plus, 13), document.createTextNode(actionText));
+  title.textContent = next === "repositories" ? "Projects" : next === "queue" ? "Work queue" : next === "music" ? "Music for work" : next === "activity" ? "Daily history" : next === "wardrobe" ? "Mochi's wardrobe" : "Focus & tasks";
   subtitle.textContent = next === "repositories"
     ? "See local Git activity and open your GitHub projects."
     : next === "queue" ? "Your next actions, gathered in one place."
       : next === "music" ? "Mochi's own radio, composed live — plus new music to discover."
       : next === "activity" ? "A private, local timeline of your work."
+      : next === "wardrobe" ? "Mochi grows as you work. Level up and dress it your way."
         : "Plan today's work and protect a little time to focus.";
   renderPage();
   // Each page eases in rather than snapping into place.
@@ -1076,10 +1084,29 @@ const focusHost: FocusHost = {
   reminderRow,
   toast,
   confetti: popConfetti,
+  xpPop: (el, amount) => xpPop(el, amount, formatNumber),
   notify: addFocusNotification,
   activity: (title, repo) => recordActivity("task", title, repo, "Task completed"),
 };
 setFocusHost(focusHost);
+
+const wardrobeHost: WardrobeHost = {
+  num: formatNumber,
+  toast,
+  confetti: popConfetti,
+  ago: (at) => timeAgoShort(at),
+};
+watchLevelUps(wardrobeHost, () => setPage("wardrobe"));
+
+/** "just now", "5m", "3h", "2d" — for the XP log. */
+function timeAgoShort(at: number): string {
+  const s = (Date.now() - at) / 1000;
+  const fa = hubLanguage === "fa";
+  if (s < 60) return fa ? "همین حالا" : "just now";
+  if (s < 3600) return `${formatNumber(Math.floor(s / 60))}${fa ? " دقیقه" : "m"}`;
+  if (s < 86400) return `${formatNumber(Math.floor(s / 3600))}${fa ? " ساعت" : "h"}`;
+  return `${formatNumber(Math.floor(s / 86400))}${fa ? " روز" : "d"}`;
+}
 
 function renderFocus() {
   clear(mainContent);
@@ -1352,6 +1379,7 @@ function renderPage() {
   if (page === "music") renderMusic();
   else if (page === "focus") renderFocus();
   else if (page === "activity") renderActivity();
+  else if (page === "wardrobe") { clear(mainContent); renderWardrobePage(mainContent, wardrobeHost); }
   else if (page === "queue") renderQueue();
   else renderRepos();
 }

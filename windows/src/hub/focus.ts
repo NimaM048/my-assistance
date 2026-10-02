@@ -17,6 +17,7 @@ import { onMusicPrefs, readMusicPrefs, writeMusicPrefs } from "../music/prefs";
 import { STATIONS, type StationId } from "../music/stations";
 import type { GitHubRepository } from "../core/bridge";
 import type { FocusData, FocusMode, FocusTask, Priority } from "./types";
+import { XP, awardXp } from "../mochi/growth";
 
 /** What the page needs from the rest of the Hub. */
 export interface FocusHost {
@@ -34,6 +35,8 @@ export interface FocusHost {
   reminderRow(): HTMLElement;
   toast(message: string): void;
   confetti(from: HTMLElement): void;
+  /** A floating "+10 XP" over an element. */
+  xpPop(from: HTMLElement, amount: number): void;
   notify(title: string, detail: string): void;
   activity(title: string, repo: string): void;
 }
@@ -422,6 +425,8 @@ function drawHero() {
   ui.goalFill.classList.toggle("complete", minutes >= goal());
 
   const s = streak();
+  // Milestones pay a bonus once, on the day they are reached.
+  if ([3, 7, 14, 30, 60, 100].includes(s)) awardXp(50, "streak", { key: `streak:${s}:${day}` });
   ui.streakValue.textContent = host.num(s);
   ui.streakFlame.classList.toggle("lit", s > 0);
 
@@ -583,6 +588,8 @@ function allDone(count: number): HTMLElement {
     window.setTimeout(() => {
       p.engine.triggerEmote("celebrate");
       host.confetti(banner);
+      const reward = awardXp(XP.allDone, "all-done", { key: `all-done:${today()}` });
+      if (reward) host.xpPop(banner, reward.amount);
     }, 250);
   }
   return banner;
@@ -606,6 +613,9 @@ function taskRow(t: FocusTask, index: number): HTMLElement {
     if (!done) {
       host.confetti(check);
       host.activity(t.title, t.repo);
+      // Paid once per task, however many times it is ticked and unticked.
+      const reward = awardXp(prio === 3 ? XP.taskHighPriority : XP.task, "task", { key: `task:${t.id}` });
+      if (reward) host.xpPop(check, reward.amount);
       heroMochi?.engine.triggerEmote(Math.random() < 0.5 ? "excited" : "giggle");
     }
     t.doneAt = done ? null : Date.now();
@@ -903,11 +913,13 @@ export function setFocusHost(h1: FocusHost) {
 function finishSession() {
   const d = host.data();
   if (!d.running || !d.endAt) return;
+  let focusReward = 0;
   const finished = d.mode;
   if (finished === "focus") {
     d.sessions.push({ at: Date.now(), minutes: d.focusMinutes, taskId: d.activeTaskId ?? null });
     const task = d.tasks.find((t) => t.id === d.activeTaskId);
     if (task) task.focusMinutes = (task.focusMinutes ?? 0) + d.focusMinutes;
+    focusReward = awardXp(d.focusMinutes * XP.focusPerMinute + XP.focusBonus, "focus", { key: `focus:${d.endAt}` })?.amount ?? 0;
   }
   const todays = d.sessions.filter((s) => host.dayKey(s.at) === today()).length;
   d.mode = finished === "focus" ? (todays % 4 === 0 ? "long" : "short") : "focus";
@@ -927,6 +939,7 @@ function finishSession() {
   if (root?.isConnected) {
     timerMochi?.engine.triggerEmote(finished === "focus" ? "celebrate" : "stretch");
     if (finished === "focus") host.confetti(ui.mochiSlot);
+    if (focusReward) host.xpPop(ui.mochiSlot, focusReward);
     refreshFocusPage();
   }
 }

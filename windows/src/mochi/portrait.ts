@@ -11,6 +11,7 @@ import { Sound } from "../core/sound";
 import type { BotEmoteName, BotStateName } from "../core/layout";
 import { music } from "../music/remote";
 import { stationById } from "../music/stations";
+import { growthStore, wornOutfit } from "./growth";
 
 export interface PortraitOptions {
   /** Canvas size in CSS pixels; the body is about 70 % of it. */
@@ -30,6 +31,8 @@ export interface PortraitOptions {
   padX?: number;
   /** Put headphones on and dance whenever Mochi's music is playing. */
   dance?: boolean;
+  /** "worn" (default) follows the wardrobe; "manual" lets the owner set engine.outfit. */
+  outfit?: "worn" | "none" | "manual";
   label?: string;
 }
 
@@ -85,6 +88,10 @@ export function createPortrait(opts: PortraitOptions): Portrait {
   // leave nothing behind.
   let detach: (() => void)[] = [];
   const attach = () => {
+    if ((opts.outfit ?? "worn") === "worn") {
+      engine.outfit = wornOutfit();
+      detach.push(growthStore.subscribe((s) => { engine.outfit = wornOutfit(s); }));
+    }
     if (opts.dance) {
       detach.push(music.onState(applyMusic));
       applyMusic();

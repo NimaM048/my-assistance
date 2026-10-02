@@ -26,6 +26,11 @@ import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../vie
 import { h } from "../views/dom";
 import type { BotEmoteName } from "../core/layout";
 import { IslandStateMachine } from "./fsm";
+import { SubagentLayer } from "../mochi/subagents";
+import { propForTool, type ToolProp } from "../mochi/props";
+import { UsageWatcher, viewOf, parseResetHint } from "../core/usage";
+import { lookFor, type WeatherNow } from "../core/weather";
+import { recap, record } from "../core/journal";
 
 const BOT_OVERHANG = 40;
 /** Room on each side of Mochi's canvas for confetti and notes. */
@@ -126,6 +131,17 @@ export class Island {
   private prevViewBeforeConfused: IslandViewName = "overview";
   private lastSyncedView: IslandViewName | null = null;
 
+  /** Little Mochis for Claude Code's subagents. */
+  private subagents = new SubagentLayer();
+  /** The prop for the tool running now, and the timer that puts it away. */
+  private toolProp: ToolProp | null = null;
+  private propTimer: number | null = null;
+  /** Usage limits, refreshed only while the island is on screen. */
+  private usage = new UsageWatcher(() => this.applyUsage());
+  /** A limit lifts: Mochi wakes up. */
+  private limitTimer: number | null = null;
+  private hadLimit = false;
+
   /** Drop sequence bookkeeping: last tick played, and whether the ✓ has fired. */
   private uploadTens = 0;
   private uploadDone = false;
@@ -201,6 +217,8 @@ export class Island {
         void Bridge.log(`decide ${d} req=${req?.requestId ?? "none"}`);
         if (!req) return;
         Sound.play(d === "deny" ? "blip" : "approve");
+        // Yes or no, with the whole head.
+        this.engine.triggerEmote(d === "allow" ? "nod" : "headShake");
         void Bridge.approvalDecision(req.requestId, d);
         State.pendingApproval = null;
         State.isPinned = false;
@@ -272,6 +290,7 @@ export class Island {
       { id: "island" },
       this.clipEl,
       this.botGlow,
+      this.subagents.el,
       this.botCanvas,
       this.miniGrid,
       this.countdown,
@@ -342,6 +361,7 @@ export class Island {
     this.updateWindowCollapsed();
     this.animateGeometry(modeOrder(mode) < modeOrder(prev));
     this.scheduleFidget();
+    this.usage.setActive(mode !== "hidden");
     State.notify();
   }
 
@@ -369,7 +389,7 @@ export class Island {
     if (!calm || busyView || this.engine.emoting || this.botHovering) return;
     // On an occasion, Mochi sometimes celebrates instead of fidgeting.
     // The occasion may have started or ended since the last look (midnight).
-    this.engine.outfit = currentLook();
+    this.refreshLook();
     const occ = occasionFor();
     if (occ && Math.random() < 0.4) {
       if (occ.particle === "confetti") this.engine.burst("confetti", 14);
@@ -378,7 +398,173 @@ export class Island {
       this.ensureRunning();
       return;
     }
-    this.engine.triggerEmote(pickFidget(new Date().getHours()));
+    // The weather has its say now and then: shivers in the cold, a sneeze in the rain.
+    const mood = State.weather?.look.mood;
+    if (mood && Math.random() < 0.3) {
+      this.engine.triggerEmote(mood === "cold" ? "shiver" : mood === "hot" ? "whistle" : mood === "storm" ? "surprised" : "sneeze");
+      this.ensureRunning();
+      return;
+    }
+    this.engine.triggerEmote(pickFidget(new Date().getHours(), Math.random, State.usage?.tired ?? 0));
+    this.ensureRunning();
+  }
+
+  /** What Mochi wears: the wardrobe, the occasion, then the weather on top. */
+  private refreshLook() {
+    const weather = State.weather?.look.outfit ?? {};
+    this.engine.outfit = { ...currentLook(), ...weather };
+  }
+
+  // ── Agent life: props, tests, subagents ─────────────────────────────────────
+
+  /** A tool call started: hand Mochi the matching prop. */
+  toolStarted(tool: string) {
+    if (this.propTimer != null) window.clearTimeout(this.propTimer);
+    this.propTimer = null;
+    this.toolProp = propForTool(tool);
+    State.notify();
+  }
+
+  /** The tool call finished: put the prop away unless another one follows soon. */
+  toolEnded() {
+    if (this.propTimer != null) window.clearTimeout(this.propTimer);
+    this.propTimer = window.setTimeout(() => {
+      this.propTimer = null;
+      this.toolProp = null;
+      State.notify();
+    }, 1500);
+  }
+
+  /** The turn ended (or needs you): no more props. */
+  stopTools() {
+    if (this.propTimer != null) window.clearTimeout(this.propTimer);
+    this.propTimer = null;
+    this.toolProp = null;
+    State.notify();
+  }
+
+  /** A test run finished: a party on green, a faint on red. */
+  testResult(pass: boolean) {
+    this.toolProp = null;
+    if (pass) {
+      this.engine.triggerEmote("celebrate");
+      this.engine.burst("confetti", 18);
+      Sound.play("proud");
+    } else {
+      this.engine.triggerEmote("faint");
+      Sound.play("dizzy");
+    }
+    this.ensureRunning();
+    State.notify();
+  }
+
+  subagentStart(id: string | undefined, label: string) {
+    this.subagents.spawn(id, label, this.subagentAnchor());
+    Sound.play("pop");
+    this.ensureRunning();
+  }
+
+  subagentStop(id: string | undefined) {
+    this.subagents.finish(id);
+    this.ensureRunning();
+  }
+
+  subagentsClear() {
+    this.subagents.clear();
+    this.ensureRunning();
+  }
+
+  private subagentAnchor() {
+    const view = State.view;
+    const visible = State.mode === "compact" || (State.mode === "expanded" && (view === "overview" || view === "empty"));
+    return {
+      cx: this.botCx.value,
+      cy: this.botCy.value,
+      size: this.botSize.value * 0.6,
+      mode: State.mode === "compact" ? "compact" as const : "expanded" as const,
+      visible,
+    };
+  }
+
+  // ── Usage, weather, presence ────────────────────────────────────────────────
+
+  /** New usage numbers: tiredness, and the nap when a limit is hit. */
+  private applyUsage() {
+    State.usage = viewOf(this.usage.snapshot);
+    this.syncLimit();
+    State.notify();
+  }
+
+  /** Re-read the usage logs now (the dev playground, the usage view). */
+  refreshUsage() {
+    void this.usage.refresh(true);
+  }
+
+  /** Something said "usage limit" — believe it now and check the logs. */
+  noteLimit(source: "claude" | "codex", message: string) {
+    const resetsAt = parseResetHint(/resets?\s+(?:at\s+)?([^.\n]+)/i.exec(message)?.[1], Date.now());
+    const view = State.usage ?? { claude: null, codex: null, tired: 1, limit: null };
+    State.usage = { ...view, tired: 1, limit: { source, resetsAt: resetsAt ?? view.limit?.resetsAt ?? null } };
+    this.syncLimit();
+    void this.usage.refresh(true);
+    State.notify();
+  }
+
+  private syncLimit() {
+    const limit = State.usage?.limit ?? null;
+    if (limit && !this.hadLimit) {
+      this.hadLimit = true;
+      const when = limit.resetsAt ? new Date(limit.resetsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      record("limit", limit.source === "codex" ? "Codex" : "Claude Code", when ? `Hit the usage limit — back at ${when}` : "Hit the usage limit");
+      this.engine.triggerEmote("yawn");
+      if (State.view !== "approval") this.alert("usage");
+      window.setTimeout(() => { if (State.view === "usage") this.collapse(); }, 9000);
+    }
+    if (this.limitTimer != null) window.clearTimeout(this.limitTimer);
+    this.limitTimer = null;
+    if (limit?.resetsAt) {
+      // Wake up the moment the limit lifts (timers are fine here: one, far away).
+      this.limitTimer = window.setTimeout(() => {
+        this.limitTimer = null;
+        if (!State.usage?.limit) return;
+        State.usage = { ...State.usage, limit: null, tired: 0 };
+        this.hadLimit = false;
+        State.noteMessage = "Usage limit lifted — Mochi is wide awake! ☀️";
+        this.alert("note");
+        this.engine.triggerEmote("stretch");
+        Sound.play("greet");
+        window.setTimeout(() => { if (State.view === "note") this.collapse(); }, 4000);
+        void this.usage.refresh(true);
+        State.notify();
+      }, Math.max(1000, limit.resetsAt - Date.now() + 1000));
+    }
+    if (!limit) this.hadLimit = false;
+  }
+
+  /** Weather from Rust (null = turned off). */
+  setWeather(now: WeatherNow | null) {
+    State.weather = now ? { now, look: lookFor(now) } : null;
+    this.refreshLook();
+    this.engine.weather = State.weather?.look.fall ?? null;
+    this.ensureRunning();
+    State.notify();
+  }
+
+  /** You locked the screen and came back: Mochi tells you what you missed. */
+  welcomeBack(since: number, awayMs: number) {
+    if (awayMs < 2 * 60_000) return;
+    const lines = recap(since, State.pendingApproval != null);
+    // A short absence with nothing to say needs no card — just a wave.
+    if (!lines.length && awayMs < 10 * 60_000) {
+      if (State.mode !== "hidden") this.engine.greet();
+      return;
+    }
+    State.recap = { awayMs, lines };
+    this.alert("recap");
+    this.engine.greet();
+    if (!lines.some((l) => l.tone === "bad")) {
+      window.setTimeout(() => { if (State.view === "recap" && !State.isPinned) this.collapse(); }, 12_000);
+    }
     this.ensureRunning();
   }
 
@@ -390,8 +576,8 @@ export class Island {
    */
   private wireGrowth() {
     let level = levelInfo(growthStore.read().xp).level;
-    this.engine.outfit = currentLook();
-    onLookChange((look) => { this.engine.outfit = look; });
+    this.refreshLook();
+    onLookChange(() => this.refreshLook());
     growthStore.subscribe((s) => {
       const now = levelInfo(s.xp).level;
       if (now > level) {
@@ -953,6 +1139,7 @@ export class Island {
     this.viewsEl.classList.toggle("hidden-by-upload", uploadActive);
 
     tickMiniBots(dt);
+    this.subagents.tick(dt, this.subagentAnchor());
     this.views.get(State.view)?.tick?.(nowMs);
     if (UploadSeq.isActive) this.stepSequence();
     this.updateCountdown(nowMs);
@@ -1131,6 +1318,10 @@ export class Island {
 
     syncMiniBotStates(State.tasks);
     this.engine.setState(State.effectiveState);
+    this.engine.tiredness = State.usage?.tired ?? 0;
+    // Props only while the agent's own Mochi is on screen and actually working.
+    const agentWorking = State.focusId === "integration_claude" && State.effectiveState === "working";
+    this.engine.setProp(agentWorking ? this.toolProp : null);
 
     // The Claude Code / Codex pill decides whether there is work music.
     const agent = State.tasks.find((t) => t.id === "integration_claude")?.state ?? "idle";

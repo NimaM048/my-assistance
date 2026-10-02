@@ -11,11 +11,14 @@ mod integrations;
 mod island;
 mod log;
 mod pipe;
+mod presence;
 mod project_status;
 mod project_search;
 mod secrets;
 mod settings;
 mod tray;
+mod usage;
+mod weather;
 mod win_user;
 
 use std::os::windows::process::CommandExt;
@@ -70,13 +73,20 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed) = {
+    let (screen_changed, autostart_changed, weather_changed) = {
         let mut current = shared.settings.lock().unwrap();
         let screen_changed = current.screen != settings.screen;
         let autostart_changed = current.autostart != settings.autostart;
+        let weather_changed = current.weather_enabled != settings.weather_enabled
+            || current.weather_city != settings.weather_city
+            || current.weather_latitude != settings.weather_latitude
+            || current.weather_longitude != settings.weather_longitude;
         *current = settings.clone();
-        (screen_changed, autostart_changed)
+        (screen_changed, autostart_changed, weather_changed)
     };
+    if weather_changed {
+        weather::poke();
+    }
     if let Err(err) = settings::save(&settings) {
         eprintln!("[coucou] could not save settings: {err}");
     }
@@ -331,6 +341,27 @@ async fn refresh_integration(app: AppHandle, id: String) {
     integrations::poll_once(app, &id).await;
 }
 
+/// Today's Claude Code and Codex usage, read from their local logs.
+/// `since_ms` is local midnight, which only the island knows how to work out.
+#[tauri::command]
+async fn usage_snapshot(since_ms: i64) -> usage::UsageSnapshot {
+    tauri::async_runtime::spawn_blocking(move || usage::snapshot(since_ms))
+        .await
+        .unwrap_or_default()
+}
+
+/// City search for the weather setting (Open-Meteo geocoding).
+#[tauri::command]
+async fn weather_search(query: String) -> Result<Vec<weather::Place>, String> {
+    weather::search(query).await
+}
+
+/// Weather right now for a city — the settings window's preview.
+#[tauri::command]
+async fn weather_preview(latitude: f64, longitude: f64, city: String) -> Result<weather::WeatherNow, String> {
+    weather::fetch(latitude, longitude, city).await
+}
+
 /// Lets the island write to the same log as the Rust side.
 #[tauri::command]
 fn log_line(message: String) {
@@ -542,6 +573,9 @@ pub fn run() {
             open_n8n,
             open_settings_window,
             set_paused,
+            usage_snapshot,
+            weather_search,
+            weather_preview,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -564,6 +598,8 @@ pub fn run() {
             pipe::start(handle.clone());
             codex_watch::start(handle.clone());
             integrations::start(handle.clone());
+            weather::start(handle.clone());
+            presence::start(handle.clone());
             Ok(())
         })
         .run(tauri::generate_context!())

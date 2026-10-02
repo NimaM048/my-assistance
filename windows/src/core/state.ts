@@ -3,6 +3,9 @@
 import type { CareKind } from "./care";
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
+import type { RecapLine } from "./journal";
+import type { UsageView } from "./usage";
+import type { WeatherLook, WeatherNow } from "./weather";
 
 export type AgentSource = "claudeCode" | "codex" | "n8n";
 export type PillBadge = "approval" | "finished" | "error";
@@ -93,6 +96,11 @@ export interface Settings {
   hooksInstalled: boolean;
   /** Claude model used by the chat. */
   model: string;
+  /** Dress Mochi for the weather in this city (Open-Meteo). Off by default. */
+  weatherEnabled: boolean;
+  weatherCity: string;
+  weatherLatitude: number;
+  weatherLongitude: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -107,6 +115,10 @@ export const DEFAULT_SETTINGS: Settings = {
   autostart: false,
   hooksInstalled: false,
   model: "claude-opus-5",
+  weatherEnabled: false,
+  weatherCity: "",
+  weatherLatitude: 0,
+  weatherLongitude: 0,
 };
 
 type Listener = () => void;
@@ -149,6 +161,13 @@ class AppState {
 
   integrations: Record<string, IntegrationInfo> = {};
 
+  /** Claude Code / Codex usage limits (see core/usage.ts). */
+  usage: UsageView | null = null;
+  /** Today's weather and what Mochi wears for it, when the feature is on. */
+  weather: { now: WeatherNow; look: WeatherLook } | null = null;
+  /** The "while you were away" summary on screen. */
+  recap: { awayMs: number; lines: RecapLine[] } | null = null;
+
   lastActivity = performance.now();
 
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -170,7 +189,14 @@ class AppState {
   }
 
   get effectiveState(): BotStateName {
-    return this.stateOverride ?? this.focusTask?.state ?? "idle";
+    if (this.stateOverride) return this.stateOverride;
+    const task = this.focusTask;
+    const state = task?.state ?? "idle";
+    // Out of usage: the agent's Mochi naps until the limit lifts.
+    if (this.usage?.limit && task?.id === "integration_claude" && (state === "idle" || state === "ratelimit")) {
+      return "sleeping";
+    }
+    return state;
   }
 
   get otherTasks(): AgentTask[] {

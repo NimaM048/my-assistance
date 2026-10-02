@@ -17,6 +17,8 @@ import { firstUpToday } from "../core/review";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
+import { countdownLabel, tokensLabel, type UsageBar } from "../core/usage";
+import { awayLabel } from "../core/journal";
 
 export interface ViewActions {
   /** Health reminder buttons. */
@@ -99,6 +101,10 @@ export function buildHeader(actions: ViewActions): ViewHost {
   // ♪ shows a little equaliser while music plays.
   const eq = h("span", { class: "eq", "aria-hidden": "true" }, h("i"), h("i"), h("i"));
   const musicBtn = h("button", { class: "music-btn", title: "Music", "aria-label": "Music", onclick: () => actions.toggleMusic() }, svg(ICONS.music, 13), eq);
+  // A little battery: how much of the usage window is left for Claude Code / Codex.
+  const usageFill = h("i", { class: "usage-fill" });
+  const usageBtn = h("button", { class: "usage-btn", title: "Usage", "aria-label": "Usage limits", onclick: () => go("usage") },
+    h("span", { class: "usage-cell", "aria-hidden": "true" }, usageFill));
 
   function go(v: IslandViewName) {
     actions.blip();
@@ -112,7 +118,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
     "div",
     { id: "header" },
     h("div", { class: "tabs", role: "tablist" }, indicator, ...tabs),
-    h("div", { class: "header-actions" }, musicBtn, hubBtn, gearBtn, soundBtn),
+    h("div", { class: "header-actions" }, usageBtn, musicBtn, hubBtn, gearBtn, soundBtn),
   );
   for (const t of tabs) t.setAttribute("role", "tab");
 
@@ -140,6 +146,13 @@ export function buildHeader(actions: ViewActions): ViewHost {
       el.style.opacity = v === "confused" ? "0" : "1";
       musicBtn.classList.toggle("playing", State.music.playing);
       musicBtn.title = State.music.playing ? "Stop the music" : "Play some music";
+      const u = State.usage;
+      const level = u ? Math.max(u.claude?.pct ?? 0, u.codex?.pct ?? 0) : 0;
+      usageBtn.hidden = !u || (!u.claude && !u.codex);
+      usageBtn.classList.toggle("on", v === "usage");
+      usageBtn.dataset.level = u?.limit ? "out" : level > 0.85 ? "low" : level > 0.6 ? "mid" : "ok";
+      usageFill.style.width = `${Math.round((1 - (u?.limit ? 1 : level)) * 100)}%`;
+      usageBtn.title = u?.limit ? "Usage limit reached — Mochi is napping" : `Usage · ${Math.round(level * 100)}% of the current window used`;
     },
   };
 }
@@ -663,6 +676,122 @@ function buildSettings(actions: ViewActions): ViewHost {
   };
 }
 
+// ── Usage limits ──────────────────────────────────────────────────────────────
+
+function usageRow(name: string, bar: UsageBar | null): HTMLElement | null {
+  if (!bar) return null;
+  const pct = bar.pct;
+  const fill = h("i", { class: "usage-bar-fill" });
+  fill.style.width = `${Math.round((pct ?? 0) * 100)}%`;
+  const level = pct == null ? "ok" : pct >= 1 ? "out" : pct > 0.85 ? "low" : pct > 0.6 ? "mid" : "ok";
+  const value = pct == null ? "—" : `${bar.estimate ? "~" : ""}${Math.round(pct * 100)}%`;
+  const bits = [`${tokensLabel(bar.todayTokens)} tokens today`];
+  if (bar.weeklyPct != null) bits.push(`week ${Math.round(bar.weeklyPct * 100)}%`);
+  const reset = h("span", { class: "usage-reset" });
+  reset.dataset.at = bar.resetsAt != null ? String(bar.resetsAt) : "";
+  return h("div", { class: "usage-row", "data-level": level },
+    h("div", { class: "usage-line" },
+      h("span", { class: "usage-name", text: name }),
+      h("span", { class: "usage-track" }, fill),
+      h("span", { class: "usage-value", text: value }),
+    ),
+    h("div", { class: "usage-detail" }, h("span", { text: bits.join(" · ") }), reset),
+  );
+}
+
+function buildUsage(actions: ViewActions): ViewHost {
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub usage-sub" });
+  const rows = h("div", { class: "usage-rows" });
+  const box = card("indigo", stack(126, 18, h("div", { class: "usage-head" }, title, h("div", { class: "grow" }),
+    h("button", { class: "link-btn usage-ok", text: "OK", onclick: () => actions.setView(State.defaultView()) })), sub, rows));
+  const el = h("div", { class: "view usage-view" }, box);
+  let key = "";
+  const paintCountdowns = () => {
+    const now = Date.now();
+    for (const r of el.querySelectorAll<HTMLElement>(".usage-reset")) {
+      const at = Number(r.dataset.at || 0);
+      r.textContent = at > now ? `resets in ${countdownLabel(at - now)}` : "";
+    }
+    const lim = State.usage?.limit;
+    if (lim) {
+      const at = lim.resetsAt;
+      sub.textContent = at && at > now
+        ? `${lim.source === "codex" ? "Codex" : "Claude Code"} is out of usage — back in ${countdownLabel(at - now)} (${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}).`
+        : `${lim.source === "codex" ? "Codex" : "Claude Code"} is out of usage for now.`;
+    }
+  };
+  return {
+    el,
+    sync() {
+      const u = State.usage;
+      const k = JSON.stringify(u);
+      if (k === key) return;
+      key = k;
+      box.style.setProperty("--wash", washRGBA(u?.limit ? "indigo" : (u?.tired ?? 0) > 0.6 ? "amber" : "cyan"));
+      title.textContent = u?.limit ? "Mochi is napping 💤" : (u?.tired ?? 0) > 0.6 ? "Getting tired… 🥱" : "Usage";
+      sub.textContent = "";
+      clear(rows);
+      const r1 = usageRow("Claude Code", u?.claude ?? null);
+      const r2 = usageRow("Codex", u?.codex ?? null);
+      if (r1) rows.append(r1);
+      if (r2) rows.append(r2);
+      if (!r1 && !r2) rows.append(h("div", { class: "sub", text: "No Claude Code or Codex activity in the last week." }));
+      rows.title = u?.claude
+        ? "Read from Claude Code's and Codex's local logs only. Claude's % is a guess from your busiest window this week; Codex reports its own."
+        : "Read from local logs only.";
+      paintCountdowns();
+    },
+    tick() {
+      // Countdowns, once a second is plenty.
+      const s = Math.floor(Date.now() / 1000);
+      if (el.dataset.s === String(s)) return;
+      el.dataset.s = String(s);
+      paintCountdowns();
+    },
+  };
+}
+
+// ── While you were away ───────────────────────────────────────────────────────
+
+function buildRecap(actions: ViewActions): ViewHost {
+  const title = h("div", { class: "title" });
+  const list = h("ul", { class: "recap-list" });
+  const row = h("div", { class: "actions" });
+  const box = card("soft", stack(128, 18, title, list, row));
+  const el = h("div", { class: "view recap-view" }, box);
+  let key = "";
+  return {
+    el,
+    sync() {
+      const r = State.recap;
+      const k = JSON.stringify(r);
+      if (k === key || !r) return;
+      key = k;
+      const name = profileStore.read().name.trim();
+      title.textContent = r.lines.length
+        ? `While you were away · ${awayLabel(r.awayMs)}`
+        : `Welcome back${name ? `, ${name}` : ""}! 🌿`;
+      clear(list);
+      const lines = r.lines.length ? r.lines.slice(0, 4) : [{ emoji: "🍃", text: "All quiet — nothing needed you.", tone: "good" as const }];
+      for (const line of lines) {
+        list.append(h("li", { class: `recap-line ${line.tone}` },
+          h("span", { class: "recap-emoji", "aria-hidden": "true", text: line.emoji }),
+          h("span", { class: "recap-text", text: line.text, title: line.text })));
+      }
+      if (r.lines.length > 4) list.append(h("li", { class: "recap-more", text: `+${r.lines.length - 4} more` }));
+      box.style.setProperty("--wash", washRGBA(r.lines.some((l) => l.tone === "bad") ? "amber" : "green"));
+      clear(row);
+      if (State.pendingApproval) {
+        row.append(btn("Review permission", "primary", () => actions.setView("approval")));
+        row.append(btn("Later", "secondary", () => actions.collapse()));
+      } else {
+        row.append(btn("Thanks, Mochi", "primary", () => actions.collapse()));
+      }
+    },
+  };
+}
+
 // ── Placeholders filled in later stages ───────────────────────────────────────
 
 function buildProject(actions: ViewActions): ViewHost {
@@ -844,6 +973,8 @@ export function buildViews(
   map.set("care", buildCare(actions));
   map.set("settings", buildSettings(actions));
   map.set("project", buildProject(actions));
+  map.set("usage", buildUsage(actions));
+  map.set("recap", buildRecap(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));
   map.set("upload", buildUpload());
   map.set("uploading", buildUploading());

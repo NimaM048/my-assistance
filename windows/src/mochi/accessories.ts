@@ -360,6 +360,69 @@ function drawHat(x: Ctx, id: string, g: OutfitGeom) {
       }
       break;
     }
+    case "umbrella": {
+      // Only ever worn for the weather: held off to one side so the face stays clear.
+      const sway = Math.sin(t * 1.3) * 0.04;
+      const hx = rx * 1.06;
+      const hy = ry * 0.52;
+      const cx = rx * 0.3;
+      const cy = -ry * 1.3;
+      x.strokeStyle = "#5b4636";
+      x.lineWidth = R * 0.05;
+      x.lineCap = "round";
+      x.beginPath();
+      x.moveTo(cx, cy);
+      x.lineTo(hx, hy);
+      x.quadraticCurveTo(hx + R * 0.02, hy + R * 0.16, hx - R * 0.1, hy + R * 0.14);
+      x.stroke();
+      x.save();
+      x.translate(cx, cy);
+      x.rotate(0.17 + sway);
+      const w = rx * 1.08;
+      const h = R * 0.6;
+      const panels = 5;
+      // The dome, scalloped along its rim…
+      const dome = new Path2D();
+      dome.moveTo(-w, 0);
+      dome.ellipse(0, 0, w, h, 0, Math.PI, Math.PI * 2);
+      for (let i = panels; i > 0; i--) {
+        const xa = -w + (i / panels) * 2 * w;
+        const xb = -w + ((i - 1) / panels) * 2 * w;
+        dome.quadraticCurveTo((xa + xb) / 2, R * 0.13, xb, 0);
+      }
+      dome.closePath();
+      // …filled with alternating panels fanning out from the shaft.
+      x.save();
+      x.clip(dome);
+      for (let i = 0; i < panels; i++) {
+        const a0 = Math.PI + (i / panels) * Math.PI;
+        const a1 = Math.PI + ((i + 1) / panels) * Math.PI;
+        x.beginPath();
+        x.moveTo(0, R * 0.3);
+        x.lineTo(Math.cos(a0) * w * 1.3, Math.sin(a0) * h * 1.3);
+        x.lineTo(Math.cos(a1) * w * 1.3, Math.sin(a1) * h * 1.3);
+        x.closePath();
+        x.fillStyle = i % 2 ? "#ffd6e2" : "#ff7aa2";
+        x.fill();
+      }
+      x.restore();
+      x.strokeStyle = "rgba(120,40,70,0.35)";
+      x.lineWidth = R * 0.025;
+      x.stroke(dome);
+      x.fillStyle = "#5b4636";
+      x.beginPath();
+      x.arc(0, -h - R * 0.04, R * 0.06, 0, Math.PI * 2);
+      x.fill();
+      x.restore();
+      const hand = x.createLinearGradient(hx, hy - R * 0.2, hx, hy + R * 0.2);
+      hand.addColorStop(0, "#EDEDEF");
+      hand.addColorStop(1, "#C4C5CA");
+      x.fillStyle = hand;
+      x.beginPath();
+      x.ellipse(hx, hy, R * 0.17, R * 0.145, 0, 0, Math.PI * 2);
+      x.fill();
+      break;
+    }
   }
   x.restore();
 }

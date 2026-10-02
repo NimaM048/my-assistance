@@ -10,6 +10,7 @@ import type {
   ProjectSearchHit, ProjectStatus, SearchProject,
 } from "./bridge";
 import { DEFAULT_SETTINGS, type Settings } from "./state";
+import type { UsageSnapshot, WeatherNow, WeatherPlace } from "./bridge";
 
 const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
@@ -87,8 +88,56 @@ const QUEUE: GitHubWorkQueue = {
 };
 
 /** Answers one command the way the Rust side would. Unknown commands are no-ops. */
+/**
+ * Pretend usage: a Claude window about two-thirds through and Codex at 41 %.
+ * `mockUsage.level` lets the playground push it toward the limit.
+ */
+export const mockUsage = { level: 0.66, limit: false };
+
+function usageSnapshot(): UsageSnapshot {
+  const now = Date.now();
+  const blockStart = now - 3 * 3_600_000 + 12 * 60_000;
+  const peak = 2_400_000;
+  return {
+    claude: {
+      todayTokens: 1_840_000,
+      todayReplies: 212,
+      blockStart,
+      blockResetsAt: blockStart + 5 * 3_600_000,
+      blockTokens: Math.round(peak * mockUsage.level),
+      blockPeak: peak,
+      limitHitAt: mockUsage.limit ? now - 60_000 : null,
+      limitResetHint: mockUsage.limit ? String(Math.floor((now + 47 * 60_000) / 1000)) : null,
+      lastActivity: now - 90_000,
+    },
+    codex: {
+      todayTokens: 412_000,
+      primary: { usedPercent: Math.round(mockUsage.level * 62), windowMinutes: 300, resetsAt: now + 2 * 3_600_000 + 14 * 60_000 },
+      secondary: { usedPercent: 18, windowMinutes: 10_080, resetsAt: now + 4 * 86_400_000 },
+      updatedAt: now - 120_000,
+    },
+  };
+}
+
+const PLACES: WeatherPlace[] = [
+  { name: "Tehran", country: "Iran", admin: "Tehran", latitude: 35.694, longitude: 51.421 },
+  { name: "Paris", country: "France", admin: "Île-de-France", latitude: 48.853, longitude: 2.349 },
+  { name: "Tabriz", country: "Iran", admin: "East Azerbaijan", latitude: 38.08, longitude: 46.292 },
+  { name: "Toronto", country: "Canada", admin: "Ontario", latitude: 43.701, longitude: -79.416 },
+];
+
 export async function mockCommand(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
   switch (cmd) {
+    case "usage_snapshot":
+      return usageSnapshot();
+    case "weather_search": {
+      await wait(250);
+      const q = String(args.query ?? "").toLowerCase();
+      return PLACES.filter((p) => p.name.toLowerCase().startsWith(q.slice(0, 3)));
+    }
+    case "weather_preview":
+      await wait(300);
+      return { code: 61, temperature: 11.4, feelsLike: 9.8, isDay: true, wind: 14, city: String(args.city ?? "") } satisfies WeatherNow;
     case "boot":
       return {
         settings,

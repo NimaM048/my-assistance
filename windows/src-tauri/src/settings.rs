@@ -20,6 +20,16 @@ pub struct Settings {
     /// Defaulted explicitly so a settings.json written by an older build still loads.
     #[serde(default = "default_model")]
     pub model: String,
+    /// Dress Mochi for the weather (Open-Meteo, off until switched on).
+    #[serde(default)]
+    pub weather_enabled: bool,
+    /// The city picked in Settings, and where it is. Only these coordinates are sent.
+    #[serde(default)]
+    pub weather_city: String,
+    #[serde(default)]
+    pub weather_latitude: f64,
+    #[serde(default)]
+    pub weather_longitude: f64,
 }
 
 fn default_model() -> String {
@@ -43,6 +53,10 @@ impl Default for Settings {
             autostart: false,
             hooks_installed: false,
             model: default_model(),
+            weather_enabled: false,
+            weather_city: String::new(),
+            weather_latitude: 0.0,
+            weather_longitude: 0.0,
         }
     }
 }

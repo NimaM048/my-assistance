@@ -23,7 +23,9 @@ export type IslandViewName =
   | "settings"
   | "project"
   | "greeting"
-  | "care";
+  | "care"
+  | "usage"
+  | "recap";
 
 export type BotStateName =
   | "idle"
@@ -42,7 +44,10 @@ export type BotEmoteName =
   | "love" | "surprised" | "proud" | "wink" | "yawn" | "happy" | "annoyed"
   // Added on Windows: more moods for idle moments and for poking Mochi.
   | "giggle" | "shy" | "excited" | "curious" | "sneeze" | "whistle" | "dance"
-  | "spin" | "stretch" | "celebrate" | "sleepy" | "pout" | "purr" | "lookAround" | "hop";
+  | "spin" | "stretch" | "celebrate" | "sleepy" | "pout" | "purr" | "lookAround" | "hop"
+  // Even more: tests that fail, yes and no, tricks, and a few idle games.
+  | "faint" | "nod" | "headShake" | "flip" | "juggle" | "bubbleGum" | "hiccup" | "kiss"
+  | "jelly" | "peekaboo" | "shiver";
 
 export type AgentLayoutMode = "none" | "grid" | "pills" | "column";
 
@@ -95,6 +100,10 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
   // A health reminder: Mochi on the left acting it out.
   care: { height: 160, botX: 72, botY: null, botDiameter: 62, agentMode: "none" },
+  // Usage limits: Mochi on the left, a bar each for Claude Code and Codex.
+  usage: { height: 188, botX: 66, botY: null, botDiameter: 56, agentMode: "none" },
+  // "While you were away…": a few lines, so a little taller.
+  recap: { height: 204, botX: 66, botY: null, botDiameter: 58, agentMode: "none" },
 };
 
 // The upload views above are only the fallback geometry. Once a file is actually

@@ -3,6 +3,7 @@
 // the pill isn't focused, plays a sound, and clears itself after 60 s.
 
 import { onEvent, Bridge, type IntegrationUpdate } from "../core/bridge";
+import { record } from "../core/journal";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
@@ -62,6 +63,7 @@ function handle(island: Island, update: IntegrationUpdate) {
         task.pillBadge = event.success ? "finished" : "error";
       }
       Sound.play(event.success ? "finish" : "error");
+      record(event.success ? "integrationOk" : "integrationFail", task.name, event.label);
       // Same as the Swift pollers: show the compact island so the badge is seen,
       // but never steal the screen for a successful deploy.
       island.reveal();

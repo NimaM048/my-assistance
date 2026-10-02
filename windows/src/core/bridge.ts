@@ -6,6 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Settings } from "./state";
+import type { WeatherNow } from "./weather";
+
+export type { WeatherNow };
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -127,7 +130,49 @@ export const Bridge = {
 
   /** Tray → Pause. Stops the integration pollers, not just the island. */
   setPaused: (paused: boolean) => call<void>("set_paused", { paused }),
+
+  // ── Usage and weather ─────────────────────────────────────────────────────
+  /** Claude Code + Codex usage from their local logs. `sinceMs` = local midnight. */
+  usageSnapshot: (sinceMs: number) => call<UsageSnapshot>("usage_snapshot", { sinceMs }),
+  /** City search for the weather setting. */
+  weatherSearch: (query: string) => callOrThrow<WeatherPlace[]>("weather_search", { query }),
+  weatherPreview: (latitude: number, longitude: number, city: string) =>
+    callOrThrow<WeatherNow>("weather_preview", { latitude, longitude, city }),
 };
+
+export interface UsageSnapshot {
+  claude: {
+    todayTokens: number;
+    todayReplies: number;
+    blockStart: number | null;
+    blockResetsAt: number | null;
+    blockTokens: number;
+    blockPeak: number;
+    limitHitAt: number | null;
+    limitResetHint: string | null;
+    lastActivity: number | null;
+  } | null;
+  codex: {
+    todayTokens: number;
+    primary: CodexWindow | null;
+    secondary: CodexWindow | null;
+    updatedAt: number | null;
+  } | null;
+}
+
+export interface CodexWindow {
+  usedPercent: number;
+  windowMinutes: number;
+  resetsAt: number | null;
+}
+
+export interface WeatherPlace {
+  name: string;
+  country: string;
+  admin: string;
+  latitude: number;
+  longitude: number;
+}
 
 export interface IntegrationUpdate {
   id: string;

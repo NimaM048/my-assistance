@@ -16,6 +16,7 @@ import { awardXp, growthStore, randomOutfit } from "../mochi/growth";
 import { readMusicPrefs, writeMusicPrefs } from "../music/prefs";
 import { OCCASIONS, occasionOverride, type OccasionId } from "../mochi/occasions";
 import type { Island } from "../island/island";
+import { mockUsage } from "../core/devmock";
 
 const CWD = "C:\\code\\my-assistance";
 
@@ -23,6 +24,8 @@ const EMOTES: BotEmoteName[] = [
   "love", "giggle", "shy", "purr", "excited", "celebrate", "dance", "whistle", "curious",
   "sneeze", "spin", "stretch", "hop", "lookAround", "wink", "proud", "surprised", "pout",
   "annoyed", "yawn", "sleepy", "happy",
+  "faint", "nod", "headShake", "flip", "juggle", "bubbleGum", "hiccup", "kiss", "jelly",
+  "peekaboo", "shiver",
 ];
 
 const STATES: BotStateName[] = [
@@ -70,7 +73,14 @@ async function session() {
     { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "src/style.css" } },
     { hook_event_name: "PreToolUse", tool_name: "Grep", tool_input: { pattern: "card", path: "src/views" } },
     { hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: { file_path: "src/mochi/engine.ts" } },
-    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm run build" } },
+    { hook_event_name: "SubagentStart", agent_id: "a1", agent_type: "Explore" },
+    { hook_event_name: "SubagentStart", agent_id: "a2", agent_type: "Plan" },
+    { hook_event_name: "PreToolUse", tool_name: "WebFetch", tool_input: { url: "https://code.claude.com/docs" } },
+    { hook_event_name: "SubagentStop", agent_id: "a1" },
+    { hook_event_name: "PreToolUse", tool_name: "TodoWrite", tool_input: {} },
+    { hook_event_name: "SubagentStop", agent_id: "a2" },
+    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } },
+    { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, test_outcome: "pass", test_summary: "24 passed" },
     { hook_event_name: "Stop", message: "Done — 6 files polished and the build is green ✨" },
   ];
   for (const step of steps) {
@@ -167,6 +177,46 @@ export function mountPlayground(island: Island) {
       ["Collapse", () => island.collapse()],
       ["Hide", () => island.fsm.forceHidden()],
     ], "Move the mouse over the island to keep it open; rub Mochi back and forth to pet it."),
+    group("Mochi at work", [
+      ["📖 Read", () => hook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "src/main.ts" } })],
+      ["🔍 Grep", () => hook({ hook_event_name: "PreToolUse", tool_name: "Grep", tool_input: { pattern: "Mochi" } })],
+      ["🔨 Edit", () => hook({ hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: { file_path: "src/style.css" } })],
+      ["💻 Bash", () => hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm run build" } })],
+      ["🌍 Web", () => hook({ hook_event_name: "PreToolUse", tool_name: "WebSearch", tool_input: { query: "tauri tray" } })],
+      ["📋 Todo", () => hook({ hook_event_name: "PreToolUse", tool_name: "TodoWrite", tool_input: {} })],
+      ["Tool done", () => hook({ hook_event_name: "PostToolUse", tool_name: "Read", tool_input: {} })],
+      ["🧪 Tests ✓", () => hook({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "npm test" }, test_outcome: "pass", test_summary: "24 passed" })],
+      ["🧪 Tests ✗", () => hook({ hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "npm test" }, test_outcome: "fail", test_summary: "2 failed, 22 passed" })],
+      ["+ Subagent", () => hook({ hook_event_name: "SubagentStart", agent_id: `s${Date.now()}`, agent_type: "Explore" })],
+      ["✓ Subagent", () => hook({ hook_event_name: "SubagentStop" })],
+      ["AskUserQuestion", () => hook({ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Which database should we use?" }] } })],
+      ["API error", () => hook({ hook_event_name: "StopFailure", error: "server_error", error_details: "Overloaded" })],
+    ], "Props show while the Claude Code pill is focused and working."),
+    group("Usage & limits", [
+      ["Usage 66%", () => { mockUsage.level = 0.66; mockUsage.limit = false; island.refreshUsage(); }],
+      ["Tired 95%", () => { mockUsage.level = 0.95; mockUsage.limit = false; island.refreshUsage(); }],
+      ["💤 Hit limit", () => { mockUsage.limit = true; island.refreshUsage(); }],
+      ["Notification limit", () => hook({ hook_event_name: "Notification", message: "Claude usage limit reached · resets 11pm" })],
+      ["Usage view", () => island.setView("usage")],
+    ]),
+    group("Weather", [
+      ["🌧 Rain", () => emitLocal("weather", { code: 63, temperature: 12, feelsLike: 10, isDay: true, wind: 12, city: "Tehran" })],
+      ["❄️ Snow", () => emitLocal("weather", { code: 73, temperature: -2, feelsLike: -6, isDay: true, wind: 8, city: "Tabriz" })],
+      ["🥶 Cold", () => emitLocal("weather", { code: 2, temperature: 3, feelsLike: 0, isDay: true, wind: 20, city: "Toronto" })],
+      ["😎 Hot", () => emitLocal("weather", { code: 0, temperature: 33, feelsLike: 35, isDay: true, wind: 5, city: "Ahvaz" })],
+      ["⛈ Storm", () => emitLocal("weather", { code: 95, temperature: 18, feelsLike: 18, isDay: true, wind: 40, city: "Rasht" })],
+      ["Off", () => emitLocal("weather", null)],
+    ], "Rust sends this every half hour when Settings → Weather is on."),
+    group("While you were away", [
+      ["Lock 25 min (busy)", () => {
+        const since = Date.now() - 25 * 60_000;
+        hook({ hook_event_name: "Stop", message: "Refactored the poller" });
+        hook({ hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "npm test" }, test_outcome: "fail", test_summary: "1 failed" });
+        integration("integration_vercel", false);
+        window.setTimeout(() => emitLocal("presence", { kind: "back", since, awayMs: 25 * 60_000 }), 600);
+      }],
+      ["Lock 40 min (quiet)", () => emitLocal("presence", { kind: "back", since: Date.now(), awayMs: 40 * 60_000 })],
+    ], "Windows reports the lock and unlock; Mochi sums up what happened in between."),
     group("Claude Code session", [
       ["▶ Run a session", () => void session()],
       ["Permission request", () => hook({ hook_event_name: "PermissionRequest", request_id: `dev-${Date.now()}`, tool_name: "Bash", tool_input: { command: "npm install --save-dev vitest" } })],

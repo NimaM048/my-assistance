@@ -8,6 +8,7 @@ import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 import { startMusicHost } from "./music/host";
+import type { WeatherNow } from "./core/weather";
 
 async function main() {
   const root = document.getElementById("root");
@@ -52,6 +53,14 @@ async function main() {
   });
 
   await onEvent<null>("screen-changed", () => void Bridge.reposition());
+
+  // Dress for the weather (Rust only sends it when the feature is on).
+  await onEvent<WeatherNow | null>("weather", (now) => island.setWeather(now));
+
+  // Screen locked / unlocked: on the way back, Mochi says what you missed.
+  await onEvent<{ kind: "left" | "back"; since: number; awayMs: number }>("presence", (p) => {
+    if (p.kind === "back") island.welcomeBack(p.since, p.awayMs);
+  });
 
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {

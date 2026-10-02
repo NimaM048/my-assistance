@@ -11,6 +11,7 @@ import type { Island } from "./island";
 import { XP, awardXp } from "../mochi/growth";
 import { markActive } from "../core/activity";
 import { countAgentSession } from "../core/review";
+import { record } from "../core/journal";
 
 /** A finished agent session earns Mochi a little XP (capped per day). */
 const rewardAgent = () => {
@@ -225,6 +226,8 @@ function handleHook(island: Island, payload: HookPayload) {
 
   /** Claude is waiting on you: the question card, or a badge-free reveal if another pill has the view. */
   const askQuestion = (text: string) => {
+    island.stopTools();
+    record("question", projectName, text.slice(0, 90));
     State.updateTask(CLAUDE_ID, "question");
     State.appendStep(CLAUDE_ID, text.replace(/\s+/g, " ").slice(0, 160));
     Sound.play("question");
@@ -273,18 +276,28 @@ function handleHook(island: Island, payload: HookPayload) {
       State.updateTask(CLAUDE_ID, "working");
       State.appendStep(CLAUDE_ID, stepLabel(tool, payload.tool_input ?? {}));
       island.toolActivity();
+      island.toolStarted(tool);
       surface("overview", false);
       break;
     }
 
     case "PostToolUse":
+    case "PostToolUseFailure": {
       State.updateTask(CLAUDE_ID, "working");
+      island.toolEnded();
+      // coucou-hook spotted a test run and kept only its verdict.
+      if (payload.test_outcome) {
+        const pass = payload.test_outcome === "pass";
+        const summary = payload.test_summary ?? "";
+        State.appendStep(CLAUDE_ID, `${pass ? "✓ Tests passed" : "✗ Tests failed"}${summary ? ` · ${summary}` : ""}`);
+        record(pass ? "testPass" : "testFail", projectName, summary);
+        island.testResult(pass);
+        surface("overview", false);
+      } else if (name === "PostToolUseFailure") {
+        State.appendStep(CLAUDE_ID, "⚠ failed");
+      }
       break;
-
-    case "PostToolUseFailure":
-      State.updateTask(CLAUDE_ID, "working");
-      State.appendStep(CLAUDE_ID, "⚠ failed");
-      break;
+    }
 
     case "Notification": {
       const message = payload.message ?? "";
@@ -293,6 +306,7 @@ function handleHook(island: Island, payload: HookPayload) {
       if (lower.includes("rate limit") || lower.includes("usage limit") || lower.includes("limite d")) {
         State.updateTask(CLAUDE_ID, "ratelimit");
         Sound.play("rate");
+        island.noteLimit(payload.agent_source === "codex" ? "codex" : "claude", message);
       } else if (kind === "elicitation_dialog" || (kind === "" && message.trim().endsWith("?"))) {
         // A real question for you. Claude Code's own notifications ("Claude is
         // waiting for your input") never end in "?", so the type decides, and
@@ -305,7 +319,10 @@ function handleHook(island: Island, payload: HookPayload) {
     case "Stop": {
       State.updateTask(CLAUDE_ID, "finished");
       rewardAgent();
+      island.stopTools();
+      island.subagentsClear();
       const finalMessage = payload.message ?? payload.last_assistant_message;
+      record("finished", projectName, (finalMessage ?? "").slice(0, 80));
       saveCompletedHandoff(payload, cwd, finalMessage ?? "");
       if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));
       Sound.play("finish");
@@ -331,7 +348,9 @@ function handleHook(island: Island, payload: HookPayload) {
       upsert(projectName, cwd, "codex");
       State.updateTask(CLAUDE_ID, "finished");
       rewardAgent();
+      island.stopTools();
       const finalMessage = payload.last_assistant_message;
+      record("finished", projectName, (finalMessage ?? "").slice(0, 80));
       saveCompletedHandoff(payload, cwd, finalMessage ?? "");
       if (finalMessage) State.appendStep(CLAUDE_ID, finalMessage.slice(0, 60));
       Sound.play("finish");
@@ -355,6 +374,10 @@ function handleHook(island: Island, payload: HookPayload) {
       const detail = stopFailureDetail(payload);
       State.appendStep(CLAUDE_ID, detail);
       State.updateTask(CLAUDE_ID, "error");
+      island.stopTools();
+      island.subagentsClear();
+      record("error", projectName, detail.replace(/^⚠\s*/, ""));
+      if (payload.error === "rate_limit") island.noteLimit("claude", payload.error_details ?? "");
       Sound.play("error");
       if (focused) surface("error", true);
       else State.setPillBadge(CLAUDE_ID, "error");
@@ -363,15 +386,18 @@ function handleHook(island: Island, payload: HookPayload) {
 
     case "SessionEnd":
       State.updateTask(CLAUDE_ID, "idle");
+      island.stopTools();
+      island.subagentsClear();
       clearSession();
       break;
 
+    // A little Mochi per subagent, instead of a "+ subagent" line in the ticker.
     case "SubagentStart":
-      State.appendStep(CLAUDE_ID, "+ subagent");
+      island.subagentStart(payload.agent_id, payload.agent_type || "Subagent");
       break;
 
     case "SubagentStop":
-      State.appendStep(CLAUDE_ID, "• subagent done");
+      island.subagentStop(payload.agent_id);
       break;
 
     case "PermissionRequest": {
@@ -398,6 +424,8 @@ function handleHook(island: Island, payload: HookPayload) {
       if (requestId) void Bridge.approvalAck(requestId);
       State.updateTask(CLAUDE_ID, "approval");
       State.isPinned = true;
+      island.stopTools();
+      record("approval", projectName, State.pendingApproval.command);
       Sound.play("approval");
       if (focused) {
         island.alert("approval");
@@ -413,6 +441,7 @@ function handleHook(island: Island, payload: HookPayload) {
       pendingTimeout = window.setTimeout(() => {
         pendingTimeout = null;
         if (!State.pendingApproval) return;
+        record("approvalMissed", projectName, State.pendingApproval.command);
         State.pendingApproval = null;
         State.isPinned = false;
         island.dropPin();

@@ -626,3 +626,23 @@ button.save.failed {
 .occ-chip b { font-weight: 600; }
 .occ-chip small { color: var(--dim); font-size: 11px; }
 .occ-chip.bday { border-color: color-mix(in srgb, var(--o0) 55%, transparent); }
+
+/* ── Weather ──────────────────────────────────────────────────────────── */
+
+.weather-city { font-size: 12.5px; color: #c9ccd4; white-space: nowrap; }
+.weather-search { width: 170px; }
+.weather-results { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px; }
+.weather-results:empty { display: none; }
+.weather-place {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e6e8ee;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.weather-place:hover { background: rgba(124, 92, 255, 0.22); border-color: rgba(124, 92, 255, 0.5); }
+.weather-preview { display: flex; flex-direction: column; gap: 2px; padding: 4px 14px 2px; }
+.weather-preview:empty { display: none; }
+.weather-now { font-size: 13px; color: #e6e8ee; }

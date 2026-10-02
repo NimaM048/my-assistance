@@ -975,6 +975,14 @@ function focusOn(t: FocusTask) {
   drawTimer();
 }
 
+/** The Games page's "Take a break": a short break, started right away. */
+export function startShortBreak() {
+  const d = host.data();
+  if (d.running && d.mode !== "focus") return;
+  beginMode("short");
+  toggleTimer();
+}
+
 /** Once a second, on every page: the timer must finish even when you're elsewhere. */
 export function tickFocus() {
   const d = host?.data();

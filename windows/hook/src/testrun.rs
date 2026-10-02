@@ -65,10 +65,11 @@ pub fn is_test_command(command: &str) -> bool {
             if PAIRS.iter().any(|(a, b)| a == token && b == next) {
                 return true;
             }
-            if SCRIPT_RUNNERS.contains(&token.as_str()) && next == "run" {
-                if tokens.get(i + 2).is_some_and(|script| script.starts_with("test")) {
-                    return true;
-                }
+            if SCRIPT_RUNNERS.contains(&token.as_str())
+                && next == "run"
+                && tokens.get(i + 2).is_some_and(|script| script.starts_with("test"))
+            {
+                return true;
             }
         }
     }

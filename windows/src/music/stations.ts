@@ -6,11 +6,13 @@
 // every sixteen bars — so the music never loops the same way twice.
 
 import {
-  bass, bell, chip, chipNoise, clap, crackle, daf, drone, drop, hat, keys, kick, pad, pluck,
-  rainBed, santur, shaker, snare, tar, tombak, type Rig,
+  bass, bell, brush, chip, chipNoise, clap, crackle, daf, drone, drop, hat, keys, kick, koto, organ, pad, pluck,
+  rainBed, ride, santur, shaker, snare, steelPan, synthLead, taiko, tar, tombak, type Rig,
 } from "./synth";
 
-export type StationId = "bounce" | "lofi" | "chiptune" | "musicbox" | "rain" | "tehran";
+export type StationId =
+  | "bounce" | "lofi" | "chiptune" | "musicbox" | "rain" | "tehran"
+  | "island" | "neon" | "sakura" | "jazz" | "space" | "bandari";
 
 export interface StepInfo {
   /** 16th note inside the bar, 0…stepsPerBar-1. */
@@ -76,6 +78,12 @@ export interface Station {
 
 const MAJOR = [0, 2, 4, 5, 7, 9, 11];
 const PENTA = [0, 2, 4, 7, 9];
+const MINOR = [0, 2, 3, 5, 7, 8, 10];
+const LYDIAN = [0, 2, 4, 6, 7, 9, 11];
+/** Hirajoshi, the koto's tuning. */
+const HIRAJOSHI = [0, 2, 3, 7, 8];
+/** Hejaz — the bright, spicy scale of bandari tunes. */
+const HEJAZ = [0, 1, 4, 5, 7, 8, 10];
 
 /** The modes of Tehran Nights, with their quarter tones. */
 const PERSIAN_MODES: Mode[] = [
@@ -225,12 +233,160 @@ export const STATIONS: Station[] = [
       }
     },
   },
+  {
+    id: "island",
+    name: "Island Breeze",
+    tagline: "Steel drums and a sunny shuffle",
+    emoji: "🏝️",
+    colors: ["#5eead4", "#fbbf24"],
+    bpm: 102, swing: 0.12, gain: 1.15, key: 60, scale: MAJOR, progression: [0, 3, 4, 3], sevenths: false, density: 0.58,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      // A relaxed dembow: boom… ch-boom-chick.
+      if (st === 0 || st === 8) kick(r, t, 0.8);
+      if ((st === 3 || st === 6 || st === 11 || st === 14) && !s.tension) snare(r, t, 0.28);
+      shaker(r, t, st % 2 ? 0.75 : 0.35);
+      if (s.energy > 0.65 && st % 4 === 2) hat(r, t, 0.35, st === 14);
+      const bassAt: Record<number, number> = { 0: 0, 6: 7, 8: 0, 10: 12, 14: 7 };
+      if (st in bassAt) bass(r, t, s.root + bassAt[st], d * 1.8, 0.8, "sine");
+      // Offbeat pan chords.
+      if (st === 2 || st === 10) for (const m of s.chord) steelPan(r, t, m, d * 1.5, 0.3);
+      if (s.lead) steelPan(r, t, s.lead.midi + 12, d * s.lead.steps, 0.95);
+      else if (st % 4 === 3 && s.rand() < 0.25) steelPan(r, t, s.chord[2] + 12, d, 0.35);
+    },
+  },
+  {
+    id: "neon",
+    name: "Neon Drive",
+    tagline: "Synthwave for night owls",
+    emoji: "🌆",
+    colors: ["#f472b6", "#818cf8"],
+    bpm: 100, swing: 0, gain: 1.05, key: 57, scale: MINOR, progression: [0, 5, 2, 6], sevenths: false, density: 0.42,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      if (st === 0 || st === 8 || (s.energy > 0.6 && (st === 4 || st === 12))) kick(r, t, st % 8 === 0 ? 0.95 : 0.6);
+      if ((st === 4 || st === 12) && !s.tension) {
+        snare(r, t, 0.65);
+        clap(r, t, 0.35);
+      }
+      if (st % 2 === 0) hat(r, t, 0.2 + (st % 4 === 2 ? 0.12 : 0));
+      // Driving eighth-note bass, octave on the off-beats.
+      if (st % 2 === 0) bass(r, t, s.root + (st % 4 === 2 ? 12 : 0), d * 1.7, 0.75, "sawtooth");
+      if (st === 0) pad(r, t, s.chord, d * 16, 1.1);
+      // A soft arpeggio climbing the chord.
+      if (st % 2 === 1 && !s.lead) pluck(r, t, s.chord[((st - 1) / 2) % s.chord.length] + 12, d, 0.22);
+      if (s.lead) synthLead(r, t, s.lead.midi + 12, d * s.lead.steps, 0.95);
+    },
+  },
+  {
+    id: "sakura",
+    name: "Sakura Garden",
+    tagline: "Koto and wind chimes in a quiet garden",
+    emoji: "🌸",
+    colors: ["#fbcfe8", "#86efac"],
+    bpm: 70, swing: 0.06, gain: 1.8, key: 62, scale: HIRAJOSHI, progression: [0, 3, 0, 4], sevenths: false, density: 0.32,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      if (st === 0 && s.bar % 2 === 0) taiko(r, t, 0.55);
+      if (st === 10 && s.bar % 4 === 3 && !s.tension) taiko(r, t, 0.3);
+      if (st === 0 && s.bar % 2 === 0) drone(r, t, [s.chord[0] - 12], d * 32, 0.6);
+      // Koto: the melody, with a little tremolo on the long notes.
+      if (s.lead) {
+        const m = s.lead.midi + 12;
+        if (s.lead.steps >= 4) for (let k = 0; k < 3; k++) koto(r, t + k * d * 0.4, m, d, k ? 0.32 : 0.9);
+        else koto(r, t, m, d * s.lead.steps, 0.85);
+      } else if (st % 4 === 0 && s.rand() < 0.5) {
+        koto(r, t, s.chord[(st / 4) % s.chord.length], d * 3, 0.35);
+      }
+      // A wind chime now and then.
+      if (s.rand() < 0.04) bell(r, t, s.chord[Math.floor(s.rand() * s.chord.length)] + 24, d * 3, 0.3);
+    },
+  },
+  {
+    id: "jazz",
+    name: "Midnight Jazz",
+    tagline: "Brushes, walking bass and a smoky piano",
+    emoji: "🎷",
+    colors: ["#fbbf24", "#7c3aed"],
+    bpm: 116, swing: 0.32, filter: 5200, gain: 1.35, key: 53, scale: MAJOR, progression: [1, 4, 0, 5], sevenths: true, density: 0.45,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      // Ding, ding-a ding, ding-a…
+      if ([0, 4, 6, 8, 12, 14].includes(st)) ride(r, t, st % 4 === 0 ? 0.9 : 0.6);
+      if (st === 4 || st === 12) {
+        hat(r, t, 0.35);
+        brush(r, t, 0.7);
+      }
+      if (st % 4 === 0) kick(r, t, 0.18);
+      // Walking bass: root, third, fifth, then a step toward the next chord.
+      const walk: Record<number, number> = { 0: s.root, 4: s.chord[1] - 24, 8: s.chord[2] - 24, 12: s.root + 6 };
+      if (st in walk) bass(r, t, walk[st], d * 3.6, 0.85, "sine");
+      // Comping: a Charleston rhythm on the chord.
+      if ((st === 0 || st === 6) && s.rand() < 0.85) for (const m of s.chord) keys(r, t + s.rand() * 0.015, m, d * (st === 0 ? 5 : 3), 0.45);
+      if (s.lead) keys(r, t, s.lead.midi + 12, d * s.lead.steps, 0.75);
+    },
+  },
+  {
+    id: "space",
+    name: "Space Drift",
+    tagline: "Weightless pads among the stars",
+    emoji: "🪐",
+    colors: ["#22d3ee", "#6366f1"],
+    bpm: 60, swing: 0, gain: 1.8, key: 52, scale: LYDIAN, progression: [0, 1, 0, 4], sevenths: true, density: 0.22,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      if (st === 0 && s.bar % 2 === 0) {
+        pad(r, t, s.chord, d * 32, 1.4);
+        drone(r, t, [s.root + 12], d * 32, 0.7);
+      }
+      // A heartbeat, only when your agent is busy.
+      if (s.energy > 0.65 && (st === 0 || st === 3)) kick(r, t, st === 0 ? 0.35 : 0.2);
+      if (s.rand() < 0.1) bell(r, t, s.chord[Math.floor(s.rand() * s.chord.length)] + 24, d * 3, 0.22);
+      if (s.lead && s.rand() < 0.85) bell(r, t, s.lead.midi + 12, d * s.lead.steps * 1.5, 0.6);
+    },
+  },
+  {
+    id: "bandari",
+    name: "Bandar Party",
+    tagline: "Bandari from the Persian Gulf — dance, Mochi, dance!",
+    emoji: "💃",
+    colors: ["#fb923c", "#22d3ee"],
+    // 6/8 like a reng, but quick and bouncy.
+    bpm: 98, swing: 0, gain: 1.05, key: 57, scale: HEJAZ, drone: true,
+    stepsPerBar: 12, stepsPerBeat: 6, progression: [0, 0, 3, 0], sevenths: false, density: 0.62,
+    play(r, t, s) {
+      const d = s.stepDur;
+      const st = s.step;
+      // Dohol and claps: DUM . . TAK . TAK | DUM . . TAK TAK .
+      if (st === 0 || st === 6) kick(r, t, st === 0 ? 0.95 : 0.75);
+      if (st === 0 || st === 6) daf(r, t, "dum", 0.45);
+      if ((st === 3 || st === 9) && !s.tension) {
+        clap(r, t, 0.75);
+        tombak(r, t, "bak", 0.4);
+      }
+      if ((st === 5 || st === 10) && !s.tension) tombak(r, t, "bak", 0.3);
+      if (st % 2 === 1) shaker(r, t, 0.6);
+      if (s.energy > 0.6 && st === 11) clap(r, t, 0.4);
+      const bassAt: Record<number, number> = { 0: 0, 4: 0, 6: 7, 9: 12 };
+      if (st in bassAt) bass(r, t, s.root + bassAt[st], d * 2, 0.85, "sawtooth");
+      // Organ stabs on the off-beats, the melody on top.
+      if ((st === 3 || st === 9) && !s.lead) for (const m of s.chord) organ(r, t, m, d, 0.3);
+      if (s.lead) organ(r, t, s.lead.midi + 12, d * s.lead.steps, 0.9);
+    },
+  },
 ];
 
 export const stationById = (id: string): Station => STATIONS.find((s) => s.id === id) ?? STATIONS[0];
 
 /** The cheerful ones, for "surprise me" work music. */
-export const WORK_PICKS: StationId[] = ["bounce", "bounce", "chiptune", "musicbox", "lofi", "tehran"];
+export const WORK_PICKS: StationId[] = [
+  "bounce", "bounce", "chiptune", "musicbox", "lofi", "tehran", "island", "neon", "jazz", "bandari",
+];
 
 // ── Composer ──────────────────────────────────────────────────────────────────
 

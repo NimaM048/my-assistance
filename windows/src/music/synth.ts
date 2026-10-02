@@ -401,3 +401,134 @@ export function drone(r: Rig, t: number, midis: number[], dur: number, vel = 1) 
   }
   lp.connect(g).connect(r.out);
 }
+
+// ── More instruments (Island Breeze, Neon Drive, Sakura Garden, Midnight Jazz,
+// Space Drift and Bandar Party) ────────────────────────────────────────────────
+
+/** Steel pan: a round sine, a hollow octave and a quick bright knock on top. */
+export function steelPan(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const len = Math.min(1.4, 0.45 + dur);
+  const g = envGain(r, t, 0.15 * vel, 0.006, len);
+  osc(r, "sine", f, t, t + len + 0.1).connect(g);
+  const p = envGain(r, t, 0.06 * vel, 0.004, len * 0.5);
+  osc(r, "sine", f * 2, t, t + len).connect(p).connect(r.out);
+  const p2 = envGain(r, t, 0.035 * vel, 0.002, 0.16);
+  osc(r, "sine", f * 3.02, t, t + 0.3).connect(p2).connect(r.out);
+  g.connect(r.out);
+}
+
+/** Synthwave lead: two detuned saws, a filter that blooms on each note, a little vibrato. */
+export function synthLead(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const len = dur + 0.12;
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.Q.value = 3;
+  lp.frequency.setValueAtTime(700, t);
+  lp.frequency.exponentialRampToValueAtTime(3600, t + 0.06);
+  lp.frequency.exponentialRampToValueAtTime(1300, t + len);
+  const g = r.ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(0.055 * vel, t + 0.012);
+  g.gain.setValueAtTime(0.05 * vel, t + len * 0.75);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  for (const cents of [-9, 9]) {
+    const o = osc(r, "sawtooth", f, t, t + len + 0.05);
+    o.detune.value = cents;
+    if (dur > 0.25) {
+      const lfo = osc(r, "sine", 5.5, t + 0.15, t + len + 0.05);
+      const depth = r.ctx.createGain();
+      depth.gain.value = f * 0.006;
+      lfo.connect(depth).connect(o.frequency);
+    }
+    o.connect(lp);
+  }
+  lp.connect(g).connect(r.out);
+}
+
+/** Koto: a plucked silk string with a little pitch settle and a pick click. */
+export function koto(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const len = Math.min(1.8, 0.5 + dur * 1.3);
+  const o = osc(r, "triangle", f * 1.012, t, t + len + 0.05);
+  o.frequency.exponentialRampToValueAtTime(f, t + 0.06);
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(Math.min(11000, f * 9), t);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(500, f * 2), t + len);
+  const g = envGain(r, t, 0.2 * vel, 0.002, len);
+  o.connect(lp).connect(g).connect(r.out);
+  const n = noiseSrc(r, t, 0.02);
+  const bp = r.ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = Math.min(8000, f * 5);
+  bp.Q.value = 2;
+  const ng = envGain(r, t, 0.05 * vel, 0.0005, 0.012);
+  n.connect(bp).connect(ng).connect(r.out);
+}
+
+/** Taiko: a big, soft boom. */
+export function taiko(r: Rig, t: number, vel = 1) {
+  const o = osc(r, "sine", 92, t, t + 0.6);
+  o.frequency.exponentialRampToValueAtTime(46, t + 0.3);
+  const g = envGain(r, t, 0.8 * vel, 0.006, 0.55);
+  o.connect(g).connect(r.out);
+  const n = noiseSrc(r, t, 0.12);
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 320;
+  const ng = envGain(r, t, 0.25 * vel, 0.003, 0.1);
+  n.connect(lp).connect(ng).connect(r.out);
+}
+
+/** Jazz brush on the snare: a soft swish rather than a crack. */
+export function brush(r: Rig, t: number, vel = 1) {
+  const n = noiseSrc(r, t, 0.2);
+  const bp = r.ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 3200;
+  bp.Q.value = 0.7;
+  const g = envGain(r, t, 0.12 * vel, 0.02, 0.14);
+  n.connect(bp).connect(g).connect(r.out);
+}
+
+/** Ride cymbal: a quiet ping that hangs in the air. */
+export function ride(r: Rig, t: number, vel = 1) {
+  const n = noiseSrc(r, t, 0.6);
+  const bp = r.ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 8200;
+  bp.Q.value = 1.6;
+  const g = envGain(r, t, 0.09 * vel, 0.001, 0.5);
+  n.connect(bp).connect(g).connect(r.out);
+  const ping = envGain(r, t, 0.012 * vel, 0.001, 0.4);
+  osc(r, "sine", 5100, t, t + 0.5).connect(ping).connect(r.out);
+}
+
+/** The bandari keyboard: a reedy organ with a quick scoop and a wide, singing vibrato. */
+export function organ(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const len = dur + 0.06;
+  const bp = r.ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = Math.min(6000, f * 3);
+  bp.Q.value = 0.8;
+  const g = r.ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(0.09 * vel, t + 0.01);
+  g.gain.setValueAtTime(0.08 * vel, t + len * 0.8);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  const lfo = osc(r, "sine", 6.5, t, t + len + 0.05);
+  const depth = r.ctx.createGain();
+  depth.gain.value = f * 0.011;
+  for (const [type, mul] of [["square", 1], ["sawtooth", 2]] as const) {
+    const o = osc(r, type, f * mul * 0.97, t, t + len + 0.05);
+    o.frequency.exponentialRampToValueAtTime(f * mul, t + 0.03);
+    lfo.connect(depth).connect(o.frequency);
+    const og = r.ctx.createGain();
+    og.gain.value = mul === 1 ? 1 : 0.35;
+    o.connect(og).connect(bp);
+  }
+  bp.connect(g).connect(r.out);
+}

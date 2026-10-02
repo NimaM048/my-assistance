@@ -15,6 +15,7 @@ import { STATIONS, type StationId } from "../music/stations";
 import { PERSIAN_MONTHS, PERSIAN_MONTHS_FA, profileStore } from "../core/profile";
 import { persianDate, upcomingOccasions } from "../mochi/occasions";
 import { CARE_INTERVALS, carePrefs, type CarePrefs } from "../core/care";
+import { lookFor } from "../core/weather";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -588,6 +589,109 @@ function aboutSection(): HTMLElement {
   );
 }
 
+// ── Weather ───────────────────────────────────────────────────────────────────
+
+function weatherSection(): HTMLElement {
+  const status = h("span");
+  const paintStatus = () => {
+    clear(status);
+    status.append(settings.weatherEnabled && settings.weatherCity ? badge("On", "ok") : badge("Off", "off"));
+  };
+  paintStatus();
+
+  const preview = h("div", { class: "weather-preview" });
+  const showPreview = async () => {
+    clear(preview);
+    if (!settings.weatherCity) return;
+    preview.append(h("span", { class: "hint", text: "Checking the sky…" }));
+    try {
+      const now = await Bridge.weatherPreview(settings.weatherLatitude, settings.weatherLongitude, settings.weatherCity);
+      const look = lookFor(now);
+      const wearing = [look.outfit.hat, look.outfit.face, look.outfit.neck].filter(Boolean).map((id) => WEAR[id as string] ?? id);
+      clear(preview);
+      preview.append(
+        h("span", { class: "weather-now", text: `${look.emoji} ${look.label} in ${now.city}` }),
+        h("span", { class: "hint", text: wearing.length ? `Mochi will wear: ${wearing.join(", ")}` : "Nice weather — Mochi keeps its own outfit." }),
+      );
+    } catch (err) {
+      clear(preview);
+      preview.append(h("span", { class: "hint", text: String(err).replace(/^Error:\s*/, "") }));
+    }
+  };
+
+  const city = h("span", { class: "weather-city", text: settings.weatherCity || "No city yet" });
+  const search = h("input", {
+    type: "text", class: "weather-search", placeholder: "Search a city…", maxlength: "60", "aria-label": "Search a city",
+  }) as HTMLInputElement;
+  const results = h("div", { class: "weather-results", role: "listbox" });
+  let timer: number | null = null;
+  let seq = 0;
+  search.addEventListener("input", () => {
+    if (timer != null) window.clearTimeout(timer);
+    const q = search.value.trim();
+    if (q.length < 2) { clear(results); return; }
+    // Only searched as you type, after a short pause — and only this text is sent.
+    timer = window.setTimeout(async () => {
+      const mine = ++seq;
+      try {
+        const places = await Bridge.weatherSearch(q);
+        if (mine !== seq) return;
+        clear(results);
+        if (!places.length) results.append(h("span", { class: "hint", text: "No city by that name." }));
+        for (const place of places) {
+          const label = [place.name, place.admin, place.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ");
+          results.append(h("button", { class: "weather-place", role: "option", text: label, onclick: () => {
+            settings.weatherCity = `${place.name}, ${place.country}`.replace(/, $/, "");
+            settings.weatherLatitude = place.latitude;
+            settings.weatherLongitude = place.longitude;
+            if (!settings.weatherEnabled) {
+              settings.weatherEnabled = true;
+              enabled.classList.add("on");
+              enabled.setAttribute("aria-checked", "true");
+            }
+            city.textContent = settings.weatherCity;
+            search.value = "";
+            clear(results);
+            paintStatus();
+            void save();
+            void showPreview();
+          } }));
+        }
+      } catch (err) {
+        if (mine !== seq) return;
+        clear(results);
+        results.append(h("span", { class: "hint", text: String(err).replace(/^Error:\s*/, "") }));
+      }
+    }, 380);
+  });
+
+  const enabled = toggle(settings.weatherEnabled, (v) => {
+    settings.weatherEnabled = v;
+    paintStatus();
+    void save();
+    if (v) void showPreview();
+    else clear(preview);
+  }, "Dress for the weather");
+  if (settings.weatherEnabled) void showPreview();
+
+  return h(
+    "section",
+    { class: "card" },
+    cardHead(ICONS.cloud, "Weather", "Mochi dresses for the weather where you are — an umbrella in the rain, a scarf in the cold, sunglasses in the sun.", status),
+    h("div", { class: "prefs" },
+      pref("Dress for the weather", "Asks Open-Meteo (free, no account) every half hour. Only your city's coordinates are sent.", enabled),
+      pref("City", "", city, search),
+      results,
+      preview,
+    ),
+  );
+}
+
+/** Wardrobe ids → words, for the weather preview. */
+const WEAR: Record<string, string> = {
+  umbrella: "an umbrella ☂️", beanie: "a beanie 🧢", scarf: "a scarf 🧣", sunglasses: "sunglasses 😎",
+};
+
 // ── Care ──────────────────────────────────────────────────────────────────────
 
 function careSection(): HTMLElement {
@@ -656,6 +760,7 @@ async function main() {
     integrationsSection(present),
     musicSection(),
     careSection(),
+    weatherSection(),
     generalSection(),
     h("footer", { class: "foot" },
       svg(ICONS.lock, 12),

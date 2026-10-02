@@ -9,7 +9,7 @@ import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, t
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
 import { mochiPortrait } from "../mochi/portrait";
-import { focusKeydown, refreshFocusPage, renderFocusPage, setFocusHost, tickFocus, type FocusHost } from "./focus";
+import { focusKeydown, refreshFocusPage, renderFocusPage, setFocusHost, startShortBreak, tickFocus, type FocusHost } from "./focus";
 import type { FocusData, FocusTask } from "./types";
 import { nowPlayingCard, renderRadioPage } from "./radio";
 import { renderWardrobePage, watchLevelUps, xpPop, type WardrobeHost } from "./wardrobe";
@@ -17,13 +17,14 @@ import { growthStore, randomOutfit } from "../mochi/growth";
 import { occasionFor, occasionOverride, persianDate } from "../mochi/occasions";
 import { profileStore } from "../core/profile";
 import { openOccasion } from "./occasion";
-import { openArcade, type ArcadeHost } from "./games";
+import { GAME_IDS, openArcade, type ArcadeHost } from "./games";
+import { renderGamesPage, type GamesPageHost } from "./gamesPage";
 import { openDayReview, type ReviewHost } from "./review";
 import { markActive, trackInput } from "../core/activity";
 import { music } from "../music/remote";
 import { STATIONS } from "../music/stations";
 
-type Page = "repositories" | "queue" | "music" | "focus" | "activity" | "wardrobe";
+type Page = "repositories" | "queue" | "music" | "focus" | "activity" | "wardrobe" | "games";
 type Filter = "all" | "public" | "private" | "pinned";
 type QueueFilter = "all" | "github" | "reviews" | "local";
 type Mood = "focus" | "energy" | "chill";
@@ -196,6 +197,37 @@ Object.assign(FA_COPY, {
   "Overdue": "عقب‌افتاده",
   "Daily reminders enabled": "یادآوری روزانه فعال شد",
   "Desktop notifications need the Coucou app.": "برای اعلان دسکتاپ باید برنامهٔ Coucou باز باشد.",
+});
+Object.assign(FA_COPY, {
+  "Break games": "بازی‌های استراحت", "Random game": "بازی تصادفی", "BREAK GAMES": "بازی‌های استراحت",
+  "Seven little games with Mochi, for when you step away from the code.": "هفت بازی کوچک با موچی، برای وقتی که از کد فاصله می‌گیری.",
+  "Seven little games with Mochi for your breaks": "هفت بازی کوچک با موچی برای زمان استراحت",
+  "Play a little, rest a lot": "کمی بازی، کلی استراحت",
+  "Short games for your breaks — they earn Mochi XP while a break is running.": "بازی‌های کوتاه برای استراحت — وقتی استراحت در جریان است، برای موچی امتیاز می‌آورند.",
+  "rounds played": "دور بازی", "Play game": "بازی کن", "Mochi's favourite:": "بازی محبوب موچی:", "Play again": "دوباره بازی", "Best": "رکورد",
+  "On a break": "در حال استراحت", "left — XP is on!": "مانده — امتیاز فعال است!", "Focus session running": "جلسهٔ تمرکز در جریان است",
+  "games are free play until your break.": "تا زمان استراحت، بازی‌ها آزادند.", "Free play": "بازی آزاد", "FREE PLAY": "بازی آزاد",
+  "XP comes with break games.": "امتیاز با بازی‌های زمان استراحت می‌آید.", "Take a 5-min break": "یک استراحت ۵ دقیقه‌ای",
+  "Not on a break — XP comes with break games": "در استراحت نیستی — امتیاز با بازی‌های زمان استراحت می‌آید",
+  "Mochi hop": "پرش موچی", "Bug whack": "باگ‌کوب", "Memory pairs": "جفت‌های حافظه", "Mochi train": "قطار موچی", "Word rain": "باران کلمه‌ها",
+  "Float Mochi through the gaps in the code walls. One button, endless fun.": "موچی را از لای دیوارهای کد رد کن. یک دکمه، کلی سرگرمی.",
+  "Bonk the bugs before they hide — ladybugs are worth more. Don't touch the butterflies!": "قبل از اینکه باگ‌ها قایم شوند بزنشان — کفشدوزک‌ها امتیاز بیشتری دارند. به پروانه‌ها دست نزن!",
+  "Flip the cards and find Mochi's wardrobe in pairs. Fewer moves, more points.": "کارت‌ها را برگردان و لباس‌های موچی را جفت‌جفت پیدا کن. حرکت کمتر، امتیاز بیشتر.",
+  "Lead a train of little Mochis to the strawberries. Don't bump the walls — or your own tail!": "قطار موچی‌های کوچولو را به سمت توت‌فرنگی‌ها ببر. به دیوار — یا دُم خودت — نخور!",
+  "Code words are raining down. Type them before they land — three misses and the round is over.": "کلمه‌های کد از آسمان می‌بارند. قبل از رسیدن به زمین تایپشان کن — سه اشتباه و دور تمام است.",
+  "Space, click or ↑": "Space، کلیک یا ↑", "Click, or numpad 1–9": "کلیک یا اعداد ۱ تا ۹", "Click the cards": "روی کارت‌ها کلیک کن",
+  "Arrows or WASD": "جهت‌ها یا WASD", "Type the words": "کلمه‌ها را تایپ کن",
+  "Tap, click or press Space to float!": "برای پرواز کلیک کن یا Space بزن!", "Walls passed": "دیوارهای ردشده", "Hops": "پرش‌ها",
+  "Bugs squashed": "باگ‌های له‌شده", "Butterflies bonked": "پروانه‌های ضربه‌خورده", "Pairs found": "جفت‌های پیداشده", "Moves": "حرکت‌ها",
+  "Time": "زمان", "Time bonus": "جایزهٔ زمان", "Strawberries": "توت‌فرنگی‌ها", "Train length": "طول قطار",
+  "Arrow keys or WASD — collect the strawberries!": "جهت‌ها یا WASD — توت‌فرنگی‌ها را جمع کن!",
+  "Words": "کلمه‌ها", "Best streak": "بهترین پشت‌سرهم", "Letters": "حرف‌ها", "Typos": "غلط‌ها",
+  "Island Breeze": "نسیم جزیره", "Steel drums and a sunny shuffle": "استیل‌درام و یک ریتم آفتابی",
+  "Neon Drive": "رانندگی نئونی", "Synthwave for night owls": "سینث‌ویو برای شب‌زنده‌دارها",
+  "Sakura Garden": "باغ شکوفه", "Koto and wind chimes in a quiet garden": "کوتو و زنگولهٔ باد در باغی آرام",
+  "Midnight Jazz": "جاز نیمه‌شب", "Brushes, walking bass and a smoky piano": "برس، باس قدم‌زن و پیانویی دودی",
+  "Space Drift": "شناور در فضا", "Weightless pads among the stars": "صداهای بی‌وزن میان ستاره‌ها",
+  "Bandar Party": "جشن بندری", "Bandari from the Persian Gulf — dance, Mochi, dance!": "بندری از خلیج فارس — برقص موچی، برقص!",
 });
 const EN_COPY = Object.fromEntries(Object.entries(FA_COPY).map(([en, fa]) => [fa, en]));
 Object.assign(FA_COPY, {
@@ -601,12 +633,13 @@ const musicNav = h("button", { class: "nav-button", onclick: () => setPage("musi
 const focusNav = h("button", { class: "nav-button", onclick: () => setPage("focus") }, svg(ICONS.timer, 16), h("span", { text: "Focus & tasks" }));
 const activityNav = h("button", { class: "nav-button", onclick: () => setPage("activity") }, svg(ICONS.clock, 16), h("span", { text: "Daily history" }));
 const wardrobeNav = h("button", { class: "nav-button", onclick: () => setPage("wardrobe") }, svg(ICONS.shirt, 16), h("span", { text: "Mochi's wardrobe" }));
+const gamesNav = h("button", { class: "nav-button", onclick: () => setPage("games") }, svg(ICONS.gamepad, 16), h("span", { text: "Break games" }));
 const accountAvatar = h("div", { class: "avatar", text: "GH" });
 const accountName = h("b", { text: "GitHub" });
 const accountNote = h("small", { text: "Connected account" });
 const title = h("h1", { text: "Projects" });
 const subtitle = h("div", { class: "subtitle", text: "See local Git activity and open your GitHub projects." });
-const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") surpriseStation(); else if (page === "wardrobe") growthStore.write({ equipped: randomOutfit() }); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
+const headerAction = h("button", { class: "toolbar-button primary", onclick: () => { if (page === "repositories") void loadRepos(); else if (page === "queue") void loadQueue(); else if (page === "music") surpriseStation(); else if (page === "wardrobe") growthStore.write({ equipped: randomOutfit() }); else if (page === "games") openArcade(arcadeHost, GAME_IDS[Math.floor(Math.random() * GAME_IDS.length)]); else openQuickCapture(); } }, svg(ICONS.refresh, 13), h("span", { text: "Refresh" }));
 const commandButton = h("button", { class: "command-shortcut", title: "Search Coucou Hub", onclick: openCommandPalette }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl K" }));
 const projectSearchButton = h("button", { class: "command-shortcut project-search-shortcut", title: "Search local project files", onclick: openProjectSearch }, svg(ICONS.search, 12), h("kbd", { text: "Ctrl Shift F" }));
 const languageButton = h("button", { class: "language-switch", title: "Switch language", "aria-label": "Switch language", text: hubLanguage === "en" ? "فارسی" : "English", onclick: toggleHubLanguage });
@@ -615,7 +648,7 @@ const notificationButton = h("button", { class: "notification-shortcut", title: 
 const mainContent = h("div", { class: "page-content" });
 const rootEl = h("div", { class: "hub" },
   h("aside", { class: "sidebar" }, logo,
-    h("div", { class: "nav-label", text: "Workspace" }), repoNav, queueNav, focusNav, activityNav, musicNav, wardrobeNav,
+    h("div", { class: "nav-label", text: "Workspace" }), repoNav, queueNav, focusNav, activityNav, musicNav, wardrobeNav, gamesNav,
     nowPlayingCard(() => setPage("music")),
     h("div", { class: "sidebar-spacer" }),
     h("div", { class: "free-note" }, h("b", { text: "Free by design" }), "Local preferences and GitHub's free API. No paid add-on."),
@@ -670,15 +703,17 @@ function setPage(next: Page) {
   focusNav.classList.toggle("active", next === "focus");
   activityNav.classList.toggle("active", next === "activity");
   wardrobeNav.classList.toggle("active", next === "wardrobe");
-  const actionText = next === "repositories" || next === "queue" ? "Refresh" : next === "music" ? "Surprise me" : next === "wardrobe" ? "Surprise outfit" : "Quick capture";
-  headerAction.replaceChildren(svg(next === "repositories" || next === "queue" ? ICONS.refresh : next === "music" ? ICONS.music : next === "wardrobe" ? ICONS.shuffle : ICONS.plus, 13), document.createTextNode(actionText));
-  title.textContent = next === "repositories" ? "Projects" : next === "queue" ? "Work queue" : next === "music" ? "Music for work" : next === "activity" ? "Daily history" : next === "wardrobe" ? "Mochi's wardrobe" : "Focus & tasks";
+  gamesNav.classList.toggle("active", next === "games");
+  const actionText = next === "repositories" || next === "queue" ? "Refresh" : next === "music" ? "Surprise me" : next === "wardrobe" ? "Surprise outfit" : next === "games" ? "Random game" : "Quick capture";
+  headerAction.replaceChildren(svg(next === "repositories" || next === "queue" ? ICONS.refresh : next === "music" ? ICONS.music : next === "wardrobe" || next === "games" ? ICONS.shuffle : ICONS.plus, 13), document.createTextNode(actionText));
+  title.textContent = next === "repositories" ? "Projects" : next === "queue" ? "Work queue" : next === "music" ? "Music for work" : next === "activity" ? "Daily history" : next === "wardrobe" ? "Mochi's wardrobe" : next === "games" ? "Break games" : "Focus & tasks";
   subtitle.textContent = next === "repositories"
     ? "See local Git activity and open your GitHub projects."
     : next === "queue" ? "Your next actions, gathered in one place."
       : next === "music" ? "Mochi's own radio, composed live — plus new music to discover."
       : next === "activity" ? "A private, local timeline of your work."
       : next === "wardrobe" ? "Mochi grows as you work. Level up and dress it your way."
+      : next === "games" ? "Seven little games with Mochi, for when you step away from the code."
         : "Plan today's work and protect a little time to focus.";
   renderPage();
   // Each page eases in rather than snapping into place.
@@ -1183,6 +1218,17 @@ const arcadeHost: ArcadeHost = {
   xpPop: (el, amount) => xpPop(el, amount, formatNumber),
 };
 
+const gamesHost: GamesPageHost = {
+  arcade: arcadeHost,
+  focusRunning: () => focus.running && focus.mode === "focus",
+  startBreak: () => {
+    startShortBreak();
+    if (page === "focus") refreshFocusPage();
+  },
+  num: formatNumber,
+  clock: fmtClock,
+};
+
 const wardrobeHost: WardrobeHost = {
   num: formatNumber,
   toast,
@@ -1319,6 +1365,7 @@ function openCommandPalette() {
       { title: "Daily history", detail: "Review focus sessions, completed tasks and opened projects", icon: ICONS.clock, run: () => setPage("activity") },
       { title: "Notifications", detail: "Review, mute or snooze Coucou alerts", icon: ICONS.bell, run: openNotificationCenter },
       { title: "Music for work", detail: "Open your music preferences and mixes", icon: ICONS.music, run: () => setPage("music") },
+      { title: "Break games", detail: "Seven little games with Mochi for your breaks", icon: ICONS.gamepad, run: () => setPage("games") },
       { title: "Surprise me with music", detail: "Search YouTube Music using your saved taste", icon: ICONS.shuffle, run: () => { setPage("music"); openMusicSearch(randomQuery()); } },
       music.state.playing
         ? { title: "Stop the music", detail: "Mochi takes the headphones off · Ctrl Shift M", icon: ICONS.speakerOff, run: () => music.stop() }
@@ -1497,6 +1544,7 @@ function renderPage() {
   else if (page === "focus") renderFocus();
   else if (page === "activity") renderActivity();
   else if (page === "wardrobe") { clear(mainContent); renderWardrobePage(mainContent, wardrobeHost); }
+  else if (page === "games") renderGamesPage(mainContent, gamesHost);
   else if (page === "queue") renderQueue();
   else renderRepos();
 }

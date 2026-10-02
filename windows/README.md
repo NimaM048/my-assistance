@@ -68,6 +68,50 @@ in time, Coucou stays quiet and Claude Code asks in the terminal as usual.
 
 It works from any terminal — Windows Terminal, PowerShell, VS Code, Git Bash.
 
+### Mochi at work
+
+- **Props for every tool.** Reading glasses and a book while Claude reads, a
+  magnifier for searches, a hammer for edits, a tiny laptop for shell commands,
+  a globe for the web and a clipboard for to-do lists.
+- **Tests.** When Claude runs your tests, Mochi throws confetti on green and
+  faints (x_x) on red. `coucou-hook.exe` keeps only the verdict and a short
+  count ("2 failed, 22 passed") — the test output itself never reaches the app.
+- **Subagents.** Each subagent gets its own little Mochi next to the big one,
+  which waves goodbye when its work is done.
+- **Allow / Deny.** Mochi nods or shakes its head.
+
+### Usage limits
+
+The battery in the island's header shows how much of the current usage window
+Claude Code and Codex have used. It is read from their own local logs
+(`%USERPROFILE%\.claude\projects` and `%USERPROFILE%\.codex\sessions`), only
+while the island is on screen, and never over the network. Codex reports its
+real percentages; Claude's is an estimate from your busiest window of the past
+week. Mochi gets sleepier as the limit nears, and naps with a countdown until it
+resets.
+
+### While you were away
+
+Lock your screen and come back: Mochi sums up what happened in between —
+sessions that finished or failed, test runs, questions waiting in a terminal,
+deploys and payments from your integrations. Coucou learns about the lock from
+Windows itself (no polling), and the summary only lives in memory.
+
+### Weather
+
+Off by default. **Settings… → Weather**: pick your city and Mochi dresses for
+it — an umbrella in the rain, a beanie and scarf in the snow, sunglasses on a
+hot day. The weather comes from [Open-Meteo](https://open-meteo.com) (free, no
+account); the only thing sent is your city's coordinates, every half hour.
+
+### Break games and music
+
+The Hub has a **Break games** page with seven games (Catch the stars, Mochi hop,
+Bug whack, Memory pairs, Mochi train, Word rain and Mochi beat). They give Mochi
+XP during a pomodoro break and are free play the rest of the time. Mochi's radio
+has twelve stations, all composed live on your PC — including Island Breeze,
+Neon Drive, Sakura Garden, Midnight Jazz, Space Drift and Bandar Party.
+
 ## Chat and keys
 
 **Settings… → Claude** takes your Anthropic API key. Keys live in the **Windows

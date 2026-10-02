@@ -13,8 +13,9 @@ import { music } from "../music/remote";
 import { stationById } from "../music/stations";
 import { sharedStore } from "../core/shared";
 import { XP, awardXp } from "../mochi/growth";
+import { bugWhack, memoryPairs, mochiHop, mochiTrain, wordRain } from "./minigames";
 
-export type GameId = "stars" | "beat";
+export type GameId = "stars" | "beat" | "hop" | "whack" | "memory" | "train" | "words";
 
 export interface ArcadeHost {
   /** When the current break ends (Date.now() ms), or null when you're not on a break. */
@@ -32,25 +33,49 @@ export interface ArcadeHost {
 interface ArcadeStats {
   best: Record<GameId, number>;
   plays: number;
+  /** Rounds played per game. */
+  played?: Partial<Record<GameId, number>>;
 }
 
-export const arcadeStore = sharedStore<ArcadeStats>("coucou.arcade.v1", () => ({ best: { stars: 0, beat: 0 }, plays: 0 }), (raw) => ({
-  best: { stars: Number(raw.best?.stars) || 0, beat: Number(raw.best?.beat) || 0 },
+export const GAME_IDS: GameId[] = ["stars", "hop", "whack", "memory", "train", "words", "beat"];
+
+export const arcadeStore = sharedStore<ArcadeStats>("coucou.arcade.v1", () => ({ best: { stars: 0, beat: 0, hop: 0, whack: 0, memory: 0, train: 0, words: 0 }, plays: 0, played: {} }), (raw) => ({
+  best: Object.fromEntries(GAME_IDS.map((id) => [id, Number(raw.best?.[id]) || 0])) as Record<GameId, number>,
   plays: Number(raw.plays) || 0,
+  played: raw.played && typeof raw.played === "object" ? raw.played : {},
 }));
 
-const GAMES: Record<GameId, { title: string; emoji: string; how: string; keys: string }> = {
-  stars: { title: "Catch the stars", emoji: "⭐", how: "Move Mochi to catch falling stars. Golden stars are worth more — dodge the storm clouds!", keys: "Mouse or ← →" },
-  beat: { title: "Mochi beat", emoji: "🥁", how: "Notes slide toward Mochi. Tap right on the beat for a Perfect.", keys: "Space, click or any key" },
+export const GAMES: Record<GameId, { title: string; emoji: string; how: string; keys: string; color: string }> = {
+  stars: { title: "Catch the stars", emoji: "⭐", how: "Move Mochi to catch falling stars. Golden stars are worth more — dodge the storm clouds!", keys: "Mouse or ← →", color: "#ffd36e" },
+  hop: { title: "Mochi hop", emoji: "🎈", how: "Float Mochi through the gaps in the code walls. One button, endless fun.", keys: "Space, click or ↑", color: "#9fd3ff" },
+  whack: { title: "Bug whack", emoji: "🐛", how: "Bonk the bugs before they hide — ladybugs are worth more. Don't touch the butterflies!", keys: "Click, or numpad 1–9", color: "#9be36b" },
+  memory: { title: "Memory pairs", emoji: "🃏", how: "Flip the cards and find Mochi's wardrobe in pairs. Fewer moves, more points.", keys: "Click the cards", color: "#c9b8ff" },
+  train: { title: "Mochi train", emoji: "🍓", how: "Lead a train of little Mochis to the strawberries. Don't bump the walls — or your own tail!", keys: "Arrows or WASD", color: "#ff8fb8" },
+  words: { title: "Word rain", emoji: "⌨️", how: "Code words are raining down. Type them before they land — three misses and the round is over.", keys: "Type the words", color: "#a5b4fc" },
+  beat: { title: "Mochi beat", emoji: "🥁", how: "Notes slide toward Mochi. Tap right on the beat for a Perfect.", keys: "Space, click or any key", color: "#ff8fb8" },
 };
 
 const ROUND = { stars: 60, beat: 64 } as const; // seconds, beats
 
-interface Game {
+function makeGame(id: GameId, env: GameEnv): Game {
+  switch (id) {
+    case "stars": return catchTheStars(env);
+    case "beat": return mochiBeat(env);
+    case "hop": return mochiHop(env);
+    case "whack": return bugWhack(env);
+    case "memory": return memoryPairs(env);
+    case "train": return mochiTrain(env);
+    case "words": return wordRain(env);
+  }
+}
+
+export interface Game {
   start(): void;
   frame(dt: number, now: number): void;
   press?(): void;
   move?(x: number): void;
+  /** A click or tap on the stage, in stage pixels. */
+  tap?(x: number, y: number): void;
   key?(e: KeyboardEvent, down: boolean): void;
   /** Score so far. */
   score: number;
@@ -65,7 +90,9 @@ interface Game {
 
 export function openArcade(host: ArcadeHost, first: GameId = "stars") {
   if (document.querySelector(".arcade-overlay")) return;
-  if (!host.breakEndsAt()) return;
+  // Opened outside a break, the arcade is free play: no clock, no XP. A break
+  // that ends mid-game still sends you back to work, kindly.
+  const free = !host.breakEndsAt();
 
   let current: GameId = first;
   let game: Game | null = null;
@@ -87,9 +114,9 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
   const bestEl = h("span", { class: "arcade-best" });
   const tabs = h("div", { class: "arcade-tabs", role: "tablist" });
   const tabFor = new Map<GameId, HTMLButtonElement>();
-  for (const id of Object.keys(GAMES) as GameId[]) {
-    const b = h("button", { role: "tab", onclick: () => { if (id !== current) { current = id; intro(); } } },
-      h("span", { "aria-hidden": "true", text: GAMES[id].emoji }), h("span", { text: GAMES[id].title })) as HTMLButtonElement;
+  for (const id of GAME_IDS) {
+    const b = h("button", { role: "tab", title: GAMES[id].title, "aria-label": GAMES[id].title, onclick: () => { if (id !== current) { current = id; intro(); } } },
+      h("span", { "aria-hidden": "true", text: GAMES[id].emoji }), h("span", { class: "arcade-tab-name", text: GAMES[id].title })) as HTMLButtonElement;
     tabFor.set(id, b);
     tabs.append(b);
   }
@@ -105,9 +132,9 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
 
   const card = h("section", { class: "arcade", role: "dialog", "aria-modal": "true", "aria-label": "Break arcade" },
     h("header", { class: "arcade-head" },
-      h("div", { class: "arcade-title" }, h("div", { class: "eyebrow", text: "WHILE YOU REST" }), h("h2", { text: "Break arcade" })),
+      h("div", { class: "arcade-title" }, h("div", { class: "eyebrow", text: free ? "FREE PLAY" : "WHILE YOU REST" }), h("h2", { text: "Break arcade" })),
       tabs,
-      h("div", { class: "arcade-clock", title: "Time left in your break" }, h("span", { "aria-hidden": "true", text: "☕" }), timeLeft),
+      h("div", { class: "arcade-clock", title: free ? "Not on a break — XP comes with break games" : "Time left in your break" }, h("span", { "aria-hidden": "true", text: free ? "🎮" : "☕" }), timeLeft),
       h("button", { class: "arcade-close", title: "Close", "aria-label": "Close", text: "×", onclick: close }),
     ),
     stage,
@@ -143,9 +170,12 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
     },
   };
 
+  /** True when a break that was running has ended (free play never "ends"). */
+  const breakEnded = () => !free && !host.breakEndsAt();
+
   const paintHud = () => {
     const ends = host.breakEndsAt();
-    timeLeft.textContent = ends ? host.clock(Math.max(0, Math.ceil((ends - Date.now()) / 1000))) : host.clock(0);
+    timeLeft.textContent = ends ? host.clock(Math.max(0, Math.ceil((ends - Date.now()) / 1000))) : free ? host.t("Free play") : host.clock(0);
     scoreEl.textContent = host.num(game?.score ?? lastScore);
     bestEl.textContent = host.num(arcadeStore.read().best[current]);
   };
@@ -181,7 +211,7 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
     // Keep the clock honest on the intro screen too.
     const idle = () => {
       if (!overlay.isConnected || game) return;
-      if (!host.breakEndsAt()) { breakOver(); return; }
+      if (breakEnded()) { breakOver(); return; }
       paintHud();
       drawBackdrop(env, current, performance.now() / 1000);
       raf = requestAnimationFrame(idle);
@@ -190,18 +220,18 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
   }
 
   function play() {
-    if (!host.breakEndsAt()) { breakOver(); return; }
+    if (breakEnded()) { breakOver(); return; }
     cancelAnimationFrame(raf);
     screen.hidden = true;
     lastScore = 0;
-    game = current === "stars" ? catchTheStars(env) : mochiBeat(env);
+    game = makeGame(current, env);
     game.start();
     last = performance.now();
     const loop = (t: number) => {
       if (!overlay.isConnected || !game) return;
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
-      if (!host.breakEndsAt()) { finish(true); return; }
+      if (breakEnded()) { finish(true); return; }
       game.frame(dt, t / 1000);
       paintHud();
       if (game.over) { finish(false); return; }
@@ -221,12 +251,16 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
     game = null;
     const stats = arcadeStore.read();
     const isBest = score > stats.best[current];
-    arcadeStore.write({ best: { ...stats.best, [current]: Math.max(score, stats.best[current]) }, plays: stats.plays + 1 });
+    arcadeStore.write({
+      best: { ...stats.best, [current]: Math.max(score, stats.best[current]) },
+      plays: stats.plays + 1,
+      played: { ...stats.played, [current]: (stats.played?.[current] ?? 0) + 1 },
+    });
 
     clear(screen);
     screen.hidden = false;
     const xpSlot = h("div", { class: "arcade-xp-slot" });
-    const again = host.breakEndsAt() && !breakEnded;
+    const again = !breakEnded && (free || host.breakEndsAt());
     screen.append(h("div", { class: "arcade-card result" },
       h("div", { class: "eyebrow", text: breakEnded ? "BREAK'S OVER" : "ROUND OVER" }),
       h("div", { class: "arcade-final" }, h("strong", { text: host.num(score) }), h("span", { text: "points" })),
@@ -241,7 +275,7 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
     mochi.engine.triggerEmote(score > 0 ? (isBest ? "celebrate" : "happy") : "shy");
     if (isBest && score > 0) host.confetti(xpSlot);
     // A little XP for resting well — once per break, more for a good round.
-    if (!rewarded && score > 0) {
+    if (!rewarded && score > 0 && !free) {
       rewarded = true;
       const amount = XP.breakGame + Math.min(10, Math.floor(score / 15));
       const got = awardXp(amount, "game", { key: `game:${host.breakKey()}` });
@@ -290,7 +324,8 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
     if (!game || (e.target as HTMLElement).closest(".arcade-screen:not([hidden])")) return;
     const r = stage.getBoundingClientRect();
     game.move?.(e.clientX - r.left);
-    game.press?.();
+    if (game.tap) game.tap(e.clientX - r.left, e.clientY - r.top);
+    else game.press?.();
   });
 
   intro();
@@ -298,7 +333,7 @@ export function openArcade(host: ArcadeHost, first: GameId = "stars") {
 
 // ── Shared drawing ────────────────────────────────────────────────────────────
 
-interface GameEnv {
+export interface GameEnv {
   ctx: CanvasRenderingContext2D;
   readonly W: number;
   readonly H: number;
@@ -349,10 +384,10 @@ function drawBackdrop(env: GameEnv, game: GameId, t: number) {
   }
 }
 
-interface Spark { x: number; y: number; vx: number; vy: number; life: number; age: number; color: string }
-interface Popup { x: number; y: number; text: string; age: number; color: string; big?: boolean }
+export interface Spark { x: number; y: number; vx: number; vy: number; life: number; age: number; color: string }
+export interface Popup { x: number; y: number; text: string; age: number; color: string; big?: boolean }
 
-function drawFx(ctx: CanvasRenderingContext2D, sparks: Spark[], popups: Popup[], dt: number) {
+export function drawFx(ctx: CanvasRenderingContext2D, sparks: Spark[], popups: Popup[], dt: number) {
   for (let i = sparks.length - 1; i >= 0; i--) {
     const s = sparks[i];
     s.age += dt;
@@ -379,7 +414,7 @@ function drawFx(ctx: CanvasRenderingContext2D, sparks: Spark[], popups: Popup[],
   ctx.globalAlpha = 1;
 }
 
-function burst(sparks: Spark[], x: number, y: number, color: string, n = 12) {
+export function burst(sparks: Spark[], x: number, y: number, color: string, n = 12) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const v = 60 + Math.random() * 140;

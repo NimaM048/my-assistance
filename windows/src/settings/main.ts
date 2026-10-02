@@ -14,6 +14,7 @@ import { readMusicPrefs, writeMusicPrefs } from "../music/prefs";
 import { STATIONS, type StationId } from "../music/stations";
 import { PERSIAN_MONTHS, PERSIAN_MONTHS_FA, profileStore } from "../core/profile";
 import { persianDate, upcomingOccasions } from "../mochi/occasions";
+import { CARE_INTERVALS, carePrefs, type CarePrefs } from "../core/care";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -587,6 +588,40 @@ function aboutSection(): HTMLElement {
   );
 }
 
+// ── Care ──────────────────────────────────────────────────────────────────────
+
+function careSection(): HTMLElement {
+  const p = carePrefs.read();
+  const every = (kind: "eyes" | "water" | "stretch", label: string) => {
+    const sel = h("select", { "aria-label": label }) as HTMLSelectElement;
+    for (const m of CARE_INTERVALS[kind]) sel.append(h("option", { value: String(m), text: m ? `Every ${m} min` : "Off" }));
+    sel.value = String(CARE_INTERVALS[kind].includes(p[kind]) ? p[kind] : CARE_INTERVALS[kind][1]);
+    sel.addEventListener("change", () => carePrefs.write({ [kind]: Number(sel.value) } as Partial<CarePrefs>));
+    return sel;
+  };
+  const hour = h("select", { "aria-label": "Review time" }) as HTMLSelectElement;
+  for (let hr = 15; hr <= 23; hr++) hour.append(h("option", { value: String(hr), text: `From ${hr}:00` }));
+  hour.value = String(p.reviewHour);
+  hour.addEventListener("change", () => carePrefs.write({ reviewHour: Number(hour.value) }));
+
+  return h(
+    "section",
+    { class: "card" },
+    cardHead(ICONS.star, "Care", "Mochi rests its eyes, drinks water and stretches with you — only while you're actually at your PC.", badge("On this PC", "ok")),
+    h("div", { class: "prefs" },
+      pref("Health reminders", "Counted only while you're active; a long pause already counts as a break.",
+        toggle(p.enabled, (v) => carePrefs.write({ enabled: v }), "Health reminders")),
+      pref("👀 Rest your eyes", "The 20-20-20 rule: look far away for 20 seconds.", every("eyes", "Eye reminder")),
+      pref("💧 Drink water", "A few sips, together with Mochi.", every("water", "Water reminder")),
+      pref("🙆 Stretch", "A guided 30-second stretch.", every("stretch", "Stretch reminder")),
+      pref("During focus sessions", "Off: reminders wait for your pomodoro break.",
+        toggle(p.duringFocus, (v) => carePrefs.write({ duringFocus: v }), "During focus sessions")),
+      pref("🌙 Evening review", "Mochi offers to wrap up the day — what went well, what comes first tomorrow.",
+        hour, toggle(p.review, (v) => carePrefs.write({ review: v }), "Evening review")),
+    ),
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -620,6 +655,7 @@ async function main() {
     codexChatSection(),
     integrationsSection(present),
     musicSection(),
+    careSection(),
     generalSection(),
     h("footer", { class: "foot" },
       svg(ICONS.lock, 12),

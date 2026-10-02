@@ -36,7 +36,8 @@ function projectStatus(cwd: string): ProjectStatus {
     unstagedFiles: 3,
     untrackedFiles: 1,
     lastCommit: "feat: add project hub and Codex integration",
-    lastCommitAt: Date.now() - 3 * 3_600_000,
+    lastCommitAt: Math.floor(Date.now() / 1000) - 3 * 3600,
+    commitsToday: 4,
     githubRepo: "NimaM048/my-assistance",
     issues: [
       { number: 12, title: "Mochi should celebrate when a long task finishes", url: "https://github.com", state: "open" },

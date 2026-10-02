@@ -21,6 +21,8 @@ import { XP, awardXp } from "../mochi/growth";
 import { occasionFor } from "../mochi/occasions";
 import { profileStore } from "../core/profile";
 import { openOccasion } from "./occasion";
+import { lastNightsReview, reviewFor } from "../core/review";
+import { carePrefs } from "../core/care";
 
 /** What the page needs from the rest of the Hub. */
 export interface FocusHost {
@@ -42,6 +44,8 @@ export interface FocusHost {
   xpPop(from: HTMLElement, amount: number): void;
   /** Opens the break arcade (only does something during a break). */
   openArcade(): void;
+  /** Opens the end-of-day review. */
+  openReview(): void;
   notify(title: string, detail: string): void;
   activity(title: string, repo: string): void;
 }
@@ -75,7 +79,7 @@ let musicWired = false;
 let root: HTMLElement | null = null;
 let greetKey = "";
 const ui = {} as {
-  hero: HTMLElement; celebrate: HTMLButtonElement;
+  hero: HTMLElement; celebrate: HTMLButtonElement; wrapUp: HTMLButtonElement; firstUp: HTMLButtonElement;
   greetTitle: HTMLElement; greetSub: HTMLElement; dateLine: HTMLElement;
   ringProgress: SVGCircleElement; ringValue: HTMLElement; ringTotal: HTMLElement;
   focusValue: HTMLElement; goalValue: HTMLElement; goalFill: HTMLElement;
@@ -173,6 +177,10 @@ function buildHero(): HTMLElement {
   ui.dateLine = h("div", { class: "eyebrow fx-date" });
   ui.greetTitle = h("h2", { class: "fx-greet" });
   ui.greetSub = h("div", { class: "fx-greet-sub" });
+  ui.wrapUp = h("button", { class: "fx-celebrate fx-wrapup", title: "What went well, and what comes first tomorrow", onclick: () => host.openReview() },
+    h("span", { text: "Wrap up the day" }), h("span", { "aria-hidden": "true", text: " 🌙" })) as HTMLButtonElement;
+  ui.firstUp = h("button", { class: "fx-celebrate fx-firstup", onclick: focusFirstUp },
+    h("span", { text: "Focus on it" }), h("span", { "aria-hidden": "true", text: " ▶" })) as HTMLButtonElement;
   ui.celebrate = h("button", { class: "fx-celebrate", hidden: true, onclick: () => {
     const occ = occasionFor();
     if (occ) openOccasion(occ, host);
@@ -407,13 +415,31 @@ function buildTimer(): HTMLElement {
   return ui.timer;
 }
 
+/** Morning: start focusing on what last night's review put first. */
+function focusFirstUp() {
+  const r = lastNightsReview();
+  if (!r?.first) return;
+  const d = host.data();
+  const task = d.tasks.find((t) => t.id === r.firstTaskId && !t.doneAt)
+    ?? d.tasks.find((t) => !t.doneAt && t.kind !== "note" && t.title.trim().toLowerCase() === r.first!.trim().toLowerCase());
+  if (task) d.activeTaskId = task.id;
+  if (d.mode !== "focus") beginMode("focus");
+  host.save();
+  if (!host.data().running) toggleTimer();
+  timerMochi?.engine.triggerEmote("excited");
+  refreshFocusPage();
+}
+
 // ── Draw ──────────────────────────────────────────────────────────────────────
 
 /** The greeting: today's occasion if there is one, else the time of day and your name. */
 function drawGreeting(sub: string) {
   const occ = occasionFor();
   const name = profileStore.read().name.trim();
-  const key = [occ?.id, occ?.greeting, name, greeting(), sub, host.lang()].join("|");
+  const hour = new Date().getHours();
+  const evening = hour >= carePrefs.read().reviewHour && !reviewFor();
+  const morning = hour >= 5 && hour < 12 ? lastNightsReview()?.first ?? null : null;
+  const key = [occ?.id, occ?.greeting, name, greeting(), sub, host.lang(), evening, morning].join("|");
   if (key === greetKey) return;
   greetKey = key;
 
@@ -439,8 +465,14 @@ function drawGreeting(sub: string) {
   } else {
     ui.greetTitle.append(h("span", { text: greeting() }));
     if (name) ui.greetTitle.append(h("span", { class: "fx-greet-name", text: `${host.lang() === "fa" ? "،" : ","} ${name}` }));
-    ui.greetSub.append(h("span", { text: sub }));
+    if (morning) {
+      // Last night you said this comes first.
+      ui.greetSub.append(h("span", { class: "fx-firstup-label", text: "First up:" }), " ", h("b", { class: "fx-firstup-title", text: morning }), ui.firstUp);
+    } else {
+      ui.greetSub.append(h("span", { text: sub }));
+    }
   }
+  if (evening) ui.greetSub.append(ui.wrapUp);
 }
 
 function drawHero() {

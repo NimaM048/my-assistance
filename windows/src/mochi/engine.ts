@@ -63,7 +63,7 @@ export type ParticleType =
   | "heart" | "star" | "spark" | "sweat" | "z"
   | "confetti" | "note" | "sparkle" | "anger" | "puff" | "qmark"
   // Occasions: blossom petals (Nowruz), pomegranate seeds (Yalda), embers (Chaharshanbe Suri).
-  | "petal" | "seed" | "ember";
+  | "petal" | "seed" | "ember" | "bubble";
 
 interface Particle {
   type: ParticleType;
@@ -730,6 +730,17 @@ export class BotEngine {
           age: -i * 0.18, life: 3 + Math.random() * 1.5, rot: Math.random() * Math.PI * 2, size: 0.1 + Math.random() * 0.06,
           spin: (Math.random() - 0.5) * 3,
           color: type === "petal" ? (Math.random() < 0.5 ? "#ffb3c7" : "#ffd6e2") : (Math.random() < 0.7 ? "#e8384f" : "#ff6b81"),
+        });
+      }
+      return;
+    }
+    if (type === "bubble") {
+      // Little water bubbles rising and wobbling, for a sip of water.
+      for (let i = 0; i < count; i++) {
+        this.particles.push({
+          type, x: (Math.random() - 0.5) * 1.4, y: 0.6,
+          vx: (Math.random() - 0.5) * 0.2, vy: -(0.45 + Math.random() * 0.4),
+          age: -i * 0.09, life: 1.4 + Math.random() * 0.8, rot: Math.random() * 6, size: 0.05 + Math.random() * 0.05,
         });
       }
       return;
@@ -1834,6 +1845,20 @@ export class BotEngine {
           x.fillStyle = "rgba(255,255,255,.5)";
           x.beginPath();
           x.arc(-sz * 0.2, -sz * 0.2, sz * 0.18, 0, Math.PI * 2);
+          x.fill();
+          break;
+        }
+        case "bubble": {
+          x.strokeStyle = "rgba(125,211,252,.95)";
+          x.fillStyle = "rgba(125,211,252,.18)";
+          x.lineWidth = Math.max(1, sz * 0.25);
+          x.beginPath();
+          x.arc(Math.sin(p.age * 6 + p.rot) * sz * 0.8, 0, sz, 0, Math.PI * 2);
+          x.fill();
+          x.stroke();
+          x.fillStyle = "rgba(255,255,255,.8)";
+          x.beginPath();
+          x.arc(Math.sin(p.age * 6 + p.rot) * sz * 0.8 - sz * 0.35, -sz * 0.35, sz * 0.22, 0, Math.PI * 2);
           x.fill();
           break;
         }

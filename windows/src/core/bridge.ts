@@ -157,6 +157,8 @@ export interface ProjectStatus {
   untrackedFiles: number;
   lastCommit: string | null;
   lastCommitAt: number | null;
+  /** Commits since midnight (older app versions don't send it). */
+  commitsToday?: number;
   githubRepo: string | null;
   issues: ProjectItem[];
   pullRequests: ProjectItem[];

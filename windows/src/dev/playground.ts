@@ -196,6 +196,12 @@ export function mountPlayground(island: Island) {
       ["Random outfit", () => growthStore.write({ equipped: randomOutfit() })],
       ["Reset growth", () => growthStore.write({ xp: 0, equipped: { hat: "sprout" }, rewarded: [], log: [], celebratedLevel: 1 })],
     ], "Outfits and level-ups are shared with the Hub (open hub.html in another tab)."),
+    group("Care", [
+      ["👀 Eyes", () => island.care?.show("eyes")],
+      ["💧 Water", () => island.care?.show("water")],
+      ["🙆 Stretch", () => island.care?.show("stretch")],
+      ["🌙 Review", () => island.care?.show("review")],
+    ], "Health reminders normally come on their own, only while you're active."),
     group("Occasions", [
       ...(Object.keys(OCCASIONS) as OccasionId[]).map((id): [string, () => void] => [`${OCCASIONS[id].emoji} ${id}`, () => occasionOverride.write({ id })]),
       ["Normal day", () => occasionOverride.write({ id: null })],

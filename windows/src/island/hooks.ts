@@ -9,9 +9,14 @@ import { Sound } from "../core/sound";
 import { State } from "../core/state";
 import type { Island } from "./island";
 import { XP, awardXp } from "../mochi/growth";
+import { markActive } from "../core/activity";
+import { countAgentSession } from "../core/review";
 
 /** A finished agent session earns Mochi a little XP (capped per day). */
-const rewardAgent = () => awardXp(XP.agentSession, "agent", { capGroup: "agent", dailyCap: XP.agentDailyCap });
+const rewardAgent = () => {
+  countAgentSession();
+  return awardXp(XP.agentSession, "agent", { capGroup: "agent", dailyCap: XP.agentDailyCap });
+};
 
 const CLAUDE_ID = "integration_claude";
 
@@ -150,6 +155,8 @@ export function registerHookHandlers(island: Island) {
 }
 
 function handleHook(island: Island, payload: HookPayload) {
+  // You're driving an agent: you're here.
+  markActive();
   if (State.paused) {
     // Silence here used to cost Claude Code nearly two minutes: the relay waited
     // for a decision from an island that had already decided not to look. Say so,

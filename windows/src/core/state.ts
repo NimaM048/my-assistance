@@ -1,5 +1,6 @@
 // App state — mirror of AppState.swift (the parts the island needs).
 
+import type { CareKind } from "./care";
 import type { BotEmoteName, BotStateName, IslandMode, IslandViewName } from "./layout";
 import type { EyeShape } from "../mochi/engine";
 
@@ -134,6 +135,8 @@ class AppState {
   promptContext: PromptContext | null = null;
   droppedFile: { name: string; path: string } | null = null;
   noteMessage: string | null = null;
+  /** The health reminder on screen: asking, being done (guided), or done. */
+  care: { kind: CareKind; phase: "ask" | "doing" | "done"; startedAt: number; xp: number } | null = null;
   searchResult: SearchResult | null = null;
   chatHistory: ChatMessage[] = [];
   suggestedPrompt: string | null = null;

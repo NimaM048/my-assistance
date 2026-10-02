@@ -22,7 +22,8 @@ export type IslandViewName =
   | "note"
   | "settings"
   | "project"
-  | "greeting";
+  | "greeting"
+  | "care";
 
 export type BotStateName =
   | "idle"
@@ -92,6 +93,8 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   settings: { height: 160, botX: 54, botY: null, botDiameter: 46, agentMode: "none" },
   project: { height: 300, botX: 48, botY: null, botDiameter: 42, agentMode: "column" },
   greeting: { height: 150, botX: 320, botY: 90, botDiameter: 0, agentMode: "none" },
+  // A health reminder: Mochi on the left acting it out.
+  care: { height: 160, botX: 72, botY: null, botDiameter: 62, agentMode: "none" },
 };
 
 // The upload views above are only the fallback geometry. Once a file is actually

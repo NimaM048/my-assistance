@@ -2121,3 +2121,28 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.25); }
 .int-card.detail {
   padding-top: 8px;
 }
+
+/* ── Care: health reminders and the evening review nudge ─────────────── */
+
+.care-stack {
+  padding: 4px 16px 4px 124px;
+  gap: 5px !important;
+}
+.care-head { display: flex; align-items: center; gap: 8px; }
+.care-emoji { font-size: 17px; line-height: 1; animation: care-bob 2.4s ease-in-out infinite; }
+.care-sub { min-height: 1.3em; }
+.care-view[data-phase="doing"] .care-sub { color: #fff; font-weight: 600; animation: care-step .5s ease both; }
+.care-view[data-phase="done"] .care-emoji { animation: care-pop .5s cubic-bezier(.34, 1.56, .64, 1) both; }
+.care-progress { height: 4px; overflow: hidden; border-radius: 2px; background: rgba(255, 255, 255, .12); }
+.care-progress[hidden] { display: none; }
+.care-progress i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #a5b4fc, #67e8f9); transform-origin: left; }
+.care-view[data-kind="stretch"] .care-progress i { background: linear-gradient(90deg, #6ee7b7, #a7f3d0); }
+.care-view .actions { align-items: center; margin-top: 3px; }
+.care-skip { width: 26px; height: 26px; display: grid; place-items: center; margin-left: 2px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: rgba(255, 255, 255, .45); font-size: 16px; cursor: pointer; transition: background .15s, color .15s; }
+.care-skip:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+@keyframes care-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes care-step { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@keyframes care-pop { from { transform: scale(.4); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .care-emoji, .care-view .care-sub { animation: none !important; }
+}

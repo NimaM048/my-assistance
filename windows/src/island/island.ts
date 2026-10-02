@@ -18,6 +18,8 @@ import type { MusicHost } from "../music/host";
 import { stationById } from "../music/stations";
 import { ITEMS, growthStore, levelInfo } from "../mochi/growth";
 import { currentLook, occasionFor, onLookChange } from "../mochi/occasions";
+import { CareCoach } from "./care";
+import { markActive, trackInput } from "../core/activity";
 import { UploadCanvas } from "../upload/canvas";
 import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
@@ -135,10 +137,29 @@ export class Island {
     this.wireInput();
     this.engine.onDizzy = () => this.handleDizzy();
     this.wireGrowth();
+    this.care = new CareCoach({
+      engine: this.engine,
+      show: () => this.alert("care"),
+      close: () => { if (State.view === "care") this.collapse(); },
+      pin: (on) => { this.fsm.pinned = on; },
+      ensureRunning: () => this.ensureRunning(),
+    });
     this.greeting.onComplete = () => this.fsm.greetComplete();
     State.subscribe(() => {
       this.dirty = true;
       this.ensureRunning();
+    });
+    // Opening the island is a sign of life (for the care reminders), and the
+    // first opening of a morning gets a stretch.
+    trackInput();
+    let wasExpanded = false;
+    State.subscribe(() => {
+      const expanded = State.mode === "expanded";
+      if (expanded && !wasExpanded) {
+        markActive();
+        this.morningHello();
+      }
+      wasExpanded = expanded;
     });
   }
 
@@ -209,6 +230,7 @@ export class Island {
       openSettingsWindow: () => void Bridge.openSettingsWindow(),
       blip: () => Sound.play("blip"),
       toggleMusic: () => this.music?.command({ action: "toggle", reason: "manual" }),
+      care: (a) => this.care?.action(a),
     };
 
     this.wakeStrip = h("div", { id: "wake-strip" });
@@ -432,6 +454,9 @@ export class Island {
     });
   }
 
+  /** Health reminders and the evening review nudge. */
+  care: CareCoach | null = null;
+
   /** A tool call happened: work music gets a little livelier. */
   toolActivity() {
     this.music?.tool();
@@ -498,6 +523,22 @@ export class Island {
     // back left it thinking the island was still open, and a click on the compact
     // island then did nothing — the island could never be reopened.
     this.fsm.forcePetit();
+  }
+
+  /** The first time Mochi is opened on a new morning, it wakes up with you. */
+  private morningHello() {
+    const hour = new Date().getHours();
+    if (hour < 5 || hour >= 12 || this.reducedMotion) return;
+    const day = new Date().toDateString();
+    try {
+      if (localStorage.getItem("coucou.morning") === day) return;
+      localStorage.setItem("coucou.morning", day);
+    } catch { return; }
+    window.setTimeout(() => {
+      this.engine.triggerEmote("yawn");
+      window.setTimeout(() => { this.engine.triggerEmote("stretch"); this.ensureRunning(); }, 1500);
+      this.ensureRunning();
+    }, 500);
   }
 
   /** Alert from the hook server: open on this view. Pinned alerts never auto-close. */

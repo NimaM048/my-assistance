@@ -1,0 +1,110 @@
+/* End-of-day review — see src/hub/review.ts. */
+
+.rv-overlay { position: fixed; inset: 0; z-index: 42; display: grid; place-items: center; padding: 20px; background: rgba(5, 5, 12, .74); backdrop-filter: blur(8px); animation: rv-fade .25s ease both; }
+
+.rv-card {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px 18px;
+  border: 1px solid rgba(165, 148, 255, .22);
+  border-radius: 24px;
+  background:
+    radial-gradient(360px 200px at 85% -10%, rgba(255, 211, 110, .1), transparent 70%),
+    radial-gradient(420px 240px at 0% 0%, rgba(124, 92, 255, .2), transparent 70%),
+    linear-gradient(170deg, #1b1a2b, #121219 70%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .65);
+  scrollbar-width: thin;
+  animation: rv-pop .5s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+.rv-card::before {
+  /* A few stars: it's evening. */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 120px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.2px 1.2px at 12% 30%, rgba(255, 255, 255, .7), transparent),
+    radial-gradient(1px 1px at 38% 14%, rgba(255, 255, 255, .5), transparent),
+    radial-gradient(1.4px 1.4px at 66% 40%, rgba(255, 255, 255, .6), transparent),
+    radial-gradient(1px 1px at 84% 18%, rgba(255, 255, 255, .5), transparent),
+    radial-gradient(1.2px 1.2px at 92% 52%, rgba(255, 255, 255, .4), transparent);
+  animation: rv-twinkle 4s ease-in-out infinite alternate;
+}
+.rv-close { position: absolute; top: 12px; inset-inline-end: 12px; z-index: 2; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: rgba(255, 255, 255, .05); color: #a7abb8; font-size: 18px; line-height: 1; cursor: pointer; }
+.rv-close:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+
+.rv-head { position: relative; display: flex; align-items: center; gap: 4px; }
+.rv-mochi { width: 120px; height: 120px; display: grid; place-items: end center; margin: -10px -6px -6px -18px; }
+.rv-head .eyebrow { color: #c6bbff; }
+.rv-head h2 { margin: 3px 0 2px; font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
+.rv-head p { margin: 0; color: #a3a8b5; font-size: 12.5px; }
+
+.rv-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rv-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 10px 11px; border: 1px solid rgba(255, 255, 255, .06); border-radius: 14px; background: rgba(255, 255, 255, .03); animation: rv-rise .45s cubic-bezier(.22, 1, .36, 1) both; }
+.rv-stat:nth-child(2) { animation-delay: .05s; }
+.rv-stat:nth-child(3) { animation-delay: .1s; }
+.rv-stat:nth-child(4) { animation-delay: .15s; }
+.rv-stat-emoji { font-size: 15px; }
+.rv-stat strong { font-family: var(--mono); font-size: 18px; font-weight: 800; }
+.rv-stat-label { color: #a3a8b5; font-size: 11.5px; }
+.rv-stat small { color: #7d8390; font-size: 10.5px; }
+
+.rv-done { display: flex; flex-wrap: wrap; gap: 6px; }
+.rv-done-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: rgba(95, 224, 176, .1); color: #c9f5e2; font-size: 12px; }
+.rv-done-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.rv-done-chip i { color: #5fe0b0; font-style: normal; font-weight: 800; }
+.rv-done-more { padding: 5px 10px; border-radius: 999px; background: rgba(255, 255, 255, .05); color: #a3a8b5; font-size: 12px; }
+.rv-empty { color: #8a909d; font-size: 12.5px; }
+
+.rv-section { display: flex; flex-direction: column; gap: 7px; }
+.rv-q { color: #e6e3f5; font-size: 13px; font-weight: 700; }
+.rv-mood-row { display: flex; align-items: center; gap: 12px; }
+.rv-moods { display: flex; gap: 6px; }
+.rv-moods button { width: 42px; height: 42px; display: grid; place-items: center; padding: 0; border: 1px solid rgba(255, 255, 255, .08); border-radius: 13px; background: rgba(255, 255, 255, .03); font-size: 21px; cursor: pointer; filter: grayscale(.5); opacity: .75; transition: transform .2s cubic-bezier(.34, 1.56, .64, 1), filter .2s, opacity .2s, border-color .2s, background .2s; }
+.rv-moods button:hover { filter: none; opacity: 1; transform: translateY(-2px); }
+.rv-moods button.active { filter: none; opacity: 1; transform: scale(1.12); border-color: rgba(255, 211, 110, .55); background: rgba(255, 211, 110, .12); }
+.rv-mood-label { color: #ffe3a3; font-size: 12.5px; font-weight: 600; }
+.rv-input { height: 38px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .1); border-radius: 12px; outline: none; background: rgba(0, 0, 0, .25); color: #f1f0f7; font: inherit; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
+.rv-input:focus { border-color: rgba(165, 148, 255, .6); box-shadow: 0 0 0 3px rgba(165, 148, 255, .15); }
+.rv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rv-chip { max-width: 100%; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid rgba(255, 255, 255, .08); border-radius: 999px; background: rgba(255, 255, 255, .03); color: #c9ccd6; font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.rv-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.rv-chip:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.rv-chip.active { border-color: rgba(165, 148, 255, .6); background: rgba(165, 148, 255, .16); color: #fff; }
+.rv-chip-prio { width: 6px; height: 6px; border-radius: 50%; background: #ff7a8a; }
+
+.rv-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; border-top: 1px solid rgba(255, 255, 255, .06); }
+.rv-week { display: flex; gap: 4px; }
+.rv-week-day { width: 28px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 0; border-radius: 8px; }
+.rv-week-day b { font-size: 15px; line-height: 1.2; color: #5d6270; }
+.rv-week-day small { color: #7d8390; font-size: 10px; }
+.rv-week-day.today { background: rgba(165, 148, 255, .1); }
+.rv-actions { display: flex; gap: 8px; }
+.rv-later { height: 38px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 999px; background: transparent; color: #c9ccd6; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.rv-later:hover { background: rgba(255, 255, 255, .05); }
+.rv-save { position: relative; height: 38px; padding: 0 18px; border: 0; border-radius: 999px; background: linear-gradient(110deg, #a594ff, #6c8bff); color: #fff; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; box-shadow: 0 10px 24px -10px rgba(124, 92, 255, .8); transition: transform .2s cubic-bezier(.34, 1.56, .64, 1), filter .15s; }
+.rv-save:hover { transform: translateY(-2px); filter: brightness(1.08); }
+.rv-card :is(button, input):focus-visible { outline: 2px solid rgba(177, 164, 255, .85); outline-offset: 2px; }
+
+/* The Focus hero's evening and morning buttons. */
+.fx-wrapup { --o0: #a594ff; --o1: #6c8bff; }
+.fx-firstup { --o0: #5fe0b0; --o1: #a594ff; }
+.fx-firstup-label { color: #a3a8b5; }
+.fx-firstup-title { max-width: 260px; overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+.fx-greet-sub:has(.fx-wrapup, .fx-firstup) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; }
+
+@keyframes rv-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rv-pop { from { opacity: 0; transform: translateY(16px) scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes rv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rv-twinkle { from { opacity: .5; } to { opacity: 1; } }
+
+@media (max-width: 560px) { .rv-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) {
+  .rv-overlay *, .rv-card::before { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

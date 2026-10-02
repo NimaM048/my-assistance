@@ -12,11 +12,15 @@ import { washRGBA, type IslandViewName, type Wash } from "../core/layout";
 import { createMiniBot, pruneMiniBots } from "../mochi/minibots";
 import { occasionFor } from "../mochi/occasions";
 import { profileStore } from "../core/profile";
+import { CARE, type CareKind } from "../core/care";
+import { firstUpToday } from "../core/review";
 import { buildPrompt } from "./chat";
 import { buildChoose, buildUpload, buildUploading } from "./upload";
 import { renderIntegrationCard, type IntegrationCardHooks } from "./integrations";
 
 export interface ViewActions {
+  /** Health reminder buttons. */
+  care(action: "start" | "done" | "later" | "skip" | "stop"): void;
   setView(v: IslandViewName): void;
   collapse(): void;
   setFocus(id: string): void;
@@ -393,6 +397,9 @@ function buildEmpty(actions: ViewActions): ViewHost {
       const g = greetingFor();
       title.textContent = name ? g.title.replace(/^(Good \w+|Lunch o'clock|Burning the midnight oil)/, `$1, ${name}`) : g.title;
       sub.textContent = g.lines[Math.floor(Math.random() * g.lines.length)];
+      // Mornings: what you said last night comes first.
+      const first = new Date().getHours() < 12 ? firstUpToday() : null;
+      if (first) sub.textContent = `First up: ${first}`;
     },
   };
 }
@@ -523,6 +530,70 @@ function buildNote(): ViewHost {
     el,
     sync() {
       title.textContent = State.noteMessage ?? "";
+    },
+  };
+}
+
+// ── Care (health reminders) ───────────────────────────────────────────────────
+
+const CARE_WASH: Record<CareKind, Wash> = { eyes: "indigo", water: "cyan", stretch: "green", review: "amber" };
+
+function buildCare(actions: ViewActions): ViewHost {
+  const emoji = h("span", { class: "care-emoji", "aria-hidden": "true" });
+  const title = h("div", { class: "title" });
+  const sub = h("div", { class: "sub care-sub" });
+  const bar = h("i");
+  const progress = h("div", { class: "care-progress", "aria-hidden": "true" }, bar);
+  const row = h("div", { class: "actions" });
+  const box = card("indigo", h("div", { class: "stack care-stack" },
+    h("div", { class: "care-head" }, emoji, title), sub, progress, row));
+  const el = h("div", { class: "view care-view" }, box);
+  let drawn = "";
+  const paint = () => {
+    const c = State.care;
+    if (!c) return;
+    const info = CARE[c.kind];
+    const key = `${c.kind}:${c.phase}`;
+    if (key === drawn) return;
+    drawn = key;
+    box.style.setProperty("--wash", washRGBA(CARE_WASH[c.kind]));
+    el.dataset.kind = c.kind;
+    el.dataset.phase = c.phase;
+    emoji.textContent = c.phase === "done" ? "✨" : info.emoji;
+    clear(row);
+    if (c.phase === "ask") {
+      title.textContent = info.title;
+      sub.textContent = info.sub;
+      row.append(
+        btn(info.start, "primary", () => actions.care(info.seconds ? "start" : "done")),
+        btn("Later", "secondary", () => actions.care("later")),
+        h("button", { class: "care-skip", title: "Skip this one", "aria-label": "Skip this one", text: "×", onclick: () => actions.care("skip") }),
+      );
+    } else if (c.phase === "doing") {
+      title.textContent = info.title;
+      sub.textContent = info.steps?.[0] ?? "";
+      row.append(btn("Stop", "secondary", () => actions.care("stop")));
+    } else {
+      title.textContent = c.kind === "water" ? "Cheers! 💧" : "Lovely — welcome back";
+      sub.textContent = c.xp ? `+${c.xp} XP for Mochi` : "Mochi feels better too.";
+    }
+    progress.hidden = c.phase !== "doing";
+  };
+  return {
+    el,
+    sync: paint,
+    tick() {
+      const c = State.care;
+      if (!c || c.phase !== "doing") return;
+      paint();
+      const info = CARE[c.kind];
+      const t = Math.min(1, (Date.now() - c.startedAt) / (info.seconds * 1000));
+      bar.style.transform = `scaleX(${1 - t})`;
+      const steps = info.steps ?? [];
+      if (steps.length) {
+        const step = steps[Math.min(steps.length - 1, Math.floor(t * steps.length))];
+        if (sub.textContent !== step) sub.textContent = step;
+      }
     },
   };
 }
@@ -770,6 +841,7 @@ export function buildViews(
   map.set("finished", buildFinished(actions));
   map.set("confused", buildConfused());
   map.set("note", buildNote());
+  map.set("care", buildCare(actions));
   map.set("settings", buildSettings(actions));
   map.set("project", buildProject(actions));
   map.set("prompt", buildPrompt(onChatHeightChange));

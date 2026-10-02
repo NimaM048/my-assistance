@@ -4,6 +4,7 @@ import "./radio.css";
 import "./wardrobe.css";
 import "./occasion.css";
 import "./games.css";
+import "./review.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
@@ -17,6 +18,8 @@ import { occasionFor, occasionOverride, persianDate } from "../mochi/occasions";
 import { profileStore } from "../core/profile";
 import { openOccasion } from "./occasion";
 import { openArcade, type ArcadeHost } from "./games";
+import { openDayReview, type ReviewHost } from "./review";
+import { markActive, trackInput } from "../core/activity";
 import { music } from "../music/remote";
 import { STATIONS } from "../music/stations";
 
@@ -138,7 +141,16 @@ const FA_COPY: Record<string, string> = {
   "Jump over the fire: give it your paleness, take its warmth.": "از روی آتش بپر: زردی‌ات را بده، سرخی‌اش را بگیر.", "Jump! 🔥": "بپر! 🔥",
   "Make a wish, then open a Hafez fortune": "نیت کن و فال حافظ بگیر", "The longest night of the year — pomegranates, watermelon and a little Hafez.": "بلندترین شب سال — انار، هندوانه و کمی حافظ.",
   "Make a wish and blow out the candles 🕯️": "آرزو کن و شمع‌ها را فوت کن 🕯️", "Blow out the candles": "شمع‌ها را فوت کن",
-  // Break arcade (src/hub/games.ts)
+  // Day review, morning start and care (src/hub/review.ts, src/island/care.ts)
+  "Wrap up the day": "جمع‌بندی روز", "What went well, and what comes first tomorrow": "چه چیزی خوب پیش رفت و فردا اول چه کنی", "Focus on it": "رویش تمرکز کن", "First up:": "اول از همه:",
+  "YOUR DAY WITH MOCHI": "روزت با موچی", "Let's close the day gently.": "بیا روز را آرام ببندیم.", "You already wrapped up today — change anything you like.": "روزت را جمع‌بندی کرده‌ای — هرچه خواستی تغییر بده.",
+  "task done": "کار انجام شد", "tasks done": "کار انجام شد", "minute of focus": "دقیقه تمرکز", "minutes of focus": "دقیقه تمرکز", "agent session": "سشن ایجنت", "agent sessions": "سشن ایجنت", "commit": "کامیت", "commits": "کامیت",
+  "Nothing ticked off today — and that's okay. Rest counts too.": "امروز تیکی نخورد — و اشکالی ندارد. استراحت هم حساب است.",
+  "How did today feel?": "امروز چطور بود؟", "Rough day": "روز سختی بود", "Meh": "معمولی رو به بد", "Okay": "بد نبود", "Good day": "روز خوبی بود", "Great day!": "روز عالی‌ای بود!",
+  "What went well?": "چه چیزی خوب پیش رفت؟", "One thing that went well today…": "یک چیز خوب امروز…", "What comes first tomorrow?": "فردا اول چه کاری می‌کنی؟", "The first thing you'll do tomorrow": "اولین کار فردا",
+  "Your week": "هفته‌ات", "Good night, Mochi": "شب بخیر موچی", "Your day with Mochi": "روزت با موچی",
+  "Sleep well — tomorrow starts with a plan ✨": "خوب بخوابی — فردا با یک برنامه شروع می‌شود ✨", "Sleep well — see you tomorrow ✨": "خوب بخوابی — تا فردا ✨",
+  "Take a care break": "یک استراحت مراقبتی",
   "Play with Mochi": "با موچی بازی کن", "Play a break game": "بازی در زمان استراحت", "Start the break and play": "استراحت را شروع کن و بازی کن", "Break arcade": "بازی‌های استراحت", "WHILE YOU REST": "تا وقتی استراحت می‌کنی", "Time left in your break": "زمان باقی‌ماندهٔ استراحت",
   "Catch the stars": "ستاره‌ها را بگیر", "Mochi beat": "ریتم موچی", "Move Mochi to catch falling stars. Golden stars are worth more — dodge the storm clouds!": "موچی را جابه‌جا کن تا ستاره‌ها را بگیرد. ستاره‌های طلایی امتیاز بیشتری دارند — از ابرهای طوفانی دوری کن!",
   "Notes slide toward Mochi. Tap right on the beat for a Perfect.": "نت‌ها به سمت موچی می‌آیند. درست روی ضرب بزن تا «عالی» بگیری.", "Mouse or ← →": "ماوس یا ← →", "Space, click or any key": "Space، کلیک یا هر کلیدی",
@@ -1123,10 +1135,42 @@ const focusHost: FocusHost = {
   confetti: popConfetti,
   xpPop: (el, amount) => xpPop(el, amount, formatNumber),
   openArcade: () => openArcade(arcadeHost),
+  openReview: () => openDayReview(reviewHost),
   notify: addFocusNotification,
   activity: (title, repo) => recordActivity("task", title, repo, "Task completed"),
 };
 setFocusHost(focusHost);
+
+/** The end-of-day review. */
+const reviewHost: ReviewHost = {
+  data: () => focus,
+  num: formatNumber,
+  date: formatDate,
+  dayKey,
+  commitsToday: () => {
+    const statuses = [...projectStatuses.values()];
+    if (!statuses.length) return null;
+    const today = dayKey(Date.now() - 5 * 3_600_000);
+    // Newer app versions count commits; older ones only know the last one.
+    return statuses.reduce((sum, st) => sum + (st.commitsToday ?? (st.lastCommitAt && dayKey(st.lastCommitAt * 1000) === today ? 1 : 0)), 0);
+  },
+  planFirst: (title, taskId, day) => {
+    let task = (taskId && focus.tasks.find((t) => t.id === taskId))
+      || focus.tasks.find((t) => !t.doneAt && t.kind !== "note" && t.title.trim().toLowerCase() === title.toLowerCase());
+    if (!task) {
+      saveCapturedItem(title, "", "task", "", day);
+      task = focus.tasks[0];
+    }
+    task.scheduledFor = day;
+    task.priority = 3;
+    task.order = Math.min(0, ...focus.tasks.map((t) => t.order ?? 0)) - 1;
+    saveFocus();
+    refreshFocusPage();
+  },
+  confetti: popConfetti,
+  toast,
+  xpPop: (el, amount) => xpPop(el, amount, formatNumber),
+};
 
 /** The break arcade lives exactly as long as a running break. */
 const arcadeHost: ArcadeHost = {
@@ -1279,6 +1323,7 @@ function openCommandPalette() {
       music.state.playing
         ? { title: "Stop the music", detail: "Mochi takes the headphones off · Ctrl Shift M", icon: ICONS.speakerOff, run: () => music.stop() }
         : { title: "Play Mochi Radio", detail: "A random station, composed live · Ctrl Shift M", icon: ICONS.music, run: surpriseStation },
+      { title: "Wrap up the day", detail: "What went well, and what comes first tomorrow", icon: ICONS.clock, run: () => { setPage("focus"); openDayReview(reviewHost); } },
       ...(() => { const occ = occasionFor(); return occ ? [{ title: occ.title, detail: occ.invite, icon: ICONS.star, run: celebrateNow }] : []; })(),
       ...STATIONS.map((st): HubCommand => ({ title: st.name, detail: st.tagline, icon: ICONS.music, run: () => music.play(st.id, "manual") })),
       { title: "Refresh repositories", detail: "Fetch the latest repository details", icon: ICONS.refresh, run: () => { setPage("repositories"); void loadRepos(); } },
@@ -1460,11 +1505,20 @@ void loadRepos();
 updateNotificationBadge();
 void onEvent<AgentNotificationEvent>("hub-agent-notification", addAgentNotification);
 void onEvent<ApprovalResolutionEvent>("hub-approval-resolved", resolveApproval);
+void onEvent("hub-open-review", () => {
+  setPage("focus");
+  window.setTimeout(() => openDayReview(reviewHost), 200);
+});
+// Signs of life for the care reminders: input here, and a running focus session.
+trackInput();
 processSnoozedNotifications();
 processPlanReminders();
 window.setInterval(processSnoozedNotifications, 15_000);
 window.setInterval(processPlanReminders, 30_000);
-window.setInterval(tickFocus, 1000);
+window.setInterval(() => {
+  tickFocus();
+  if (focus.running) markActive();
+}, 1000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     processSnoozedNotifications();

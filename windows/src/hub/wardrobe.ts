@@ -190,6 +190,8 @@ export function renderWardrobePage(container: HTMLElement, h0: WardrobeHost) {
       [ICONS.bell, "Streak of 3, 7, 14, 30 days", "+50"],
       [ICONS.code, "Agent session finished", `+${XP.agentSession}`],
       [ICONS.music, "Play a break game", `+${XP.breakGame}–${XP.breakGame + 10}`],
+      [ICONS.star, "Take a care break", `+${XP.care}`],
+      [ICONS.clock, "Wrap up the day", "+10"],
     ];
     for (const [icon, label, amount] of rows) {
       earn.append(h("div", { class: "wd-earn-row" }, h("span", { class: "wd-earn-icon" }, svg(icon, 12)), h("span", { text: label }), h("b", { text: amount })));

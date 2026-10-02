@@ -24,6 +24,8 @@ pub struct ProjectStatus {
     untracked_files: usize,
     last_commit: Option<String>,
     last_commit_at: Option<i64>,
+    /// Commits since local midnight, for Mochi's end-of-day review.
+    commits_today: usize,
     github_repo: Option<String>,
     issues: Vec<ProjectItem>,
     pull_requests: Vec<ProjectItem>,
@@ -69,6 +71,7 @@ async fn load_with_github(path: String, include_github: bool) -> Result<ProjectS
             untracked_files: 0,
             last_commit: None,
             last_commit_at: None,
+            commits_today: 0,
             github_repo: None,
             issues: Vec::new(),
             pull_requests: Vec::new(),
@@ -97,6 +100,10 @@ async fn load_with_github(path: String, include_github: bool) -> Result<ProjectS
     }
     let last_commit = git(&git_root, &["log", "-1", "--format=%h %s"]).await.filter(|s| !s.is_empty());
     let last_commit_at = git(&git_root, &["log", "-1", "--format=%ct"]).await.and_then(|s| s.parse().ok());
+    let commits_today = git(&git_root, &["log", "--since=midnight", "--format=%h"])
+        .await
+        .map(|s| s.lines().filter(|line| !line.trim().is_empty()).count())
+        .unwrap_or(0);
     let remote = git(&git_root, &["remote", "get-url", "origin"]).await;
     let repo = remote.as_deref().and_then(parse_github_repo);
     let (issues, pull_requests, github_error) = if include_github {
@@ -123,6 +130,7 @@ async fn load_with_github(path: String, include_github: bool) -> Result<ProjectS
         untracked_files,
         last_commit,
         last_commit_at,
+        commits_today,
         github_repo: repo.map(|(owner, name)| format!("{owner}/{name}")),
         issues,
         pull_requests,

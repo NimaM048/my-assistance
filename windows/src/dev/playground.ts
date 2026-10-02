@@ -13,6 +13,7 @@ import { emitLocal } from "../core/bridge";
 import type { BotEmoteName, BotStateName, IslandViewName } from "../core/layout";
 import { State } from "../core/state";
 import { awardXp, growthStore, randomOutfit } from "../mochi/growth";
+import { readMusicPrefs, writeMusicPrefs } from "../music/prefs";
 import { OCCASIONS, occasionOverride, type OccasionId } from "../mochi/occasions";
 import type { Island } from "../island/island";
 
@@ -181,7 +182,11 @@ export function mountPlayground(island: Island) {
       ["🎮 Chiptune", () => playStation("chiptune")],
       ["🎠 Music box", () => playStation("musicbox")],
       ["🌧 Rain", () => playStation("rain")],
+      ["🏮 Tehran", () => playStation("tehran")],
       ["■ Stop", () => emitLocal("music-command", { action: "stop" })],
+      ["⚡ Tool storm", () => { for (let i = 0; i < 14; i++) island.toolActivity(); }],
+      ["🎵 Finale", () => island["music"]?.engine.finale()],
+      ["🌧☕ Ambience", () => writeMusicPrefs({ ambienceOn: !readMusicPrefs().ambienceOn })],
       ["Jingle ✓", () => emitLocal("music-command", { action: "jingle", kind: "finish" })],
       ["Jingle ✗", () => emitLocal("music-command", { action: "jingle", kind: "error" })],
     ], "A running session plays work music on its own (Settings → Music in the Hub to change it)."),

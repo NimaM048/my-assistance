@@ -11,6 +11,7 @@ import { createPortrait, type Portrait } from "../mochi/portrait";
 import { music } from "../music/remote";
 import { onMusicPrefs, readMusicPrefs, writeMusicPrefs, type MusicPrefs } from "../music/prefs";
 import { STATIONS, stationById, type StationId } from "../music/stations";
+import { AMBIENCE, AMBIENCE_PRESETS, SILENT, type AmbienceId } from "../music/ambience";
 
 let stageMochi: Portrait | null = null;
 let root: HTMLElement | null = null;
@@ -46,7 +47,9 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
   const nowName = h("h2", { class: "radio-now-name" });
   const nowTag = h("p", { class: "radio-now-tag" });
   const nowReason = h("span", { class: "radio-reason" });
-  const bpm = h("span", { class: "radio-bpm" });
+  const bpm = h("span", { class: "radio-bpm", title: "Tempo — it follows your agent while it works" });
+  const modeChip = h("span", { class: "radio-mode", title: "The dastgah the santur is playing in", hidden: true });
+  const tensionChip = h("span", { class: "radio-tension", hidden: true }, h("i", { "aria-hidden": "true" }), h("span", { text: "Waiting for you…" }));
   const playBtn = h("button", { class: "radio-play", onclick: () => {
     const s = music.state;
     if (s.playing) music.stop();
@@ -69,7 +72,7 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
       h("div", { class: "eyebrow", text: "MOCHI RADIO" }),
       h("div", { class: "radio-now-title" }, nowEmoji, nowName),
       nowTag,
-      h("div", { class: "radio-chips" }, nowReason, bpm),
+      h("div", { class: "radio-chips" }, nowReason, bpm, modeChip, tensionChip),
       h("div", { class: "radio-transport" }, playBtn, next,
         h("label", { class: "radio-volume-wrap" }, svg(ICONS.speakerOn, 14), volume)),
       h("p", { class: "radio-offline", text: "Composed live on your PC — no streaming, works offline." }),
@@ -88,7 +91,8 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
       h("span", { class: "radio-card-copy" },
         h("b", { text: st.name }),
         h("small", { text: st.tagline }),
-        h("span", { class: "radio-card-bpm" }, h("strong", { text: String(st.bpm) }), " ", h("span", { text: "BPM" })),
+        h("span", { class: "radio-card-bpm" }, h("strong", { text: String(st.bpm) }), " ", h("span", { text: "BPM" }),
+          st.stepsPerBar === 12 ? h("span", { class: "radio-card-meter", text: "6/8" }) : null),
       ),
     );
     cards.set(st.id, card);
@@ -101,6 +105,7 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
     hero,
     h("div", { class: "radio-section-head" }, h("div", { class: "eyebrow", text: "STATIONS" }), h("h3", { text: "Pick a vibe" })),
     grid,
+    buildAmbience(),
     settings,
     h("div", { class: "radio-section-head" }, h("div", { class: "eyebrow", text: "DISCOVER" }), h("h3", { text: "More music on YouTube Music" })),
     discovery,
@@ -120,7 +125,13 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
     nowTag.textContent = st.tagline;
     nowReason.textContent = s.playing ? REASON[s.reason ?? "manual"] : "Paused";
     clear(bpm);
-    bpm.append(h("strong", { text: String(st.bpm) }), " ", h("span", { text: "BPM" }));
+    bpm.append(h("strong", { text: String(Math.round(s.playing ? s.bpm : st.bpm)) }), " ", h("span", { text: "BPM" }));
+    modeChip.hidden = !(s.playing && s.mode);
+    if (s.mode) {
+      clear(modeChip);
+      modeChip.append(h("span", { text: "Dastgah" }), " ", h("b", { text: s.mode }));
+    }
+    tensionChip.hidden = !(s.playing && s.tension);
     clear(playBtn);
     playBtn.append(svg(s.playing ? "M7 5h3.5v14H7zm6.5 0H17v14h-3.5z" : "M8 5.5v13l11-6.5-11-6.5z", 18), h("span", { text: s.playing ? "Pause" : "Play" }));
     playBtn.setAttribute("aria-label", s.playing ? "Pause" : "Play");
@@ -145,6 +156,85 @@ export function renderRadioPage(container: HTMLElement, discovery: HTMLElement) 
     });
   }
   draw();
+}
+
+// ── Ambience mixer ────────────────────────────────────────────────────────────
+
+const AMB_COLORS: Record<AmbienceId, string> = {
+  rain: "#6cc4ff", cafe: "#d9a36b", fire: "#ff8a4c", wind: "#9be3c4", birds: "#ffd36e", crickets: "#a594ff",
+};
+let ambienceBox: HTMLElement | null = null;
+let paintAmbience: ((p: MusicPrefs) => void) | null = null;
+let ambienceWired = false;
+
+/** Rain, café, fire… mixed on top of (or instead of) the music. Built once per visit, then updated in place. */
+function buildAmbience(): HTMLElement {
+  const sliders = new Map<AmbienceId, { input: HTMLInputElement; row: HTMLElement; value: HTMLElement }>();
+  const power = h("button", { class: "radio-switch", role: "switch", "aria-label": "Ambience", onclick: () => {
+    const p = readMusicPrefs();
+    writeMusicPrefs({ ambienceOn: !p.ambienceOn });
+  } }, h("i")) as HTMLButtonElement;
+
+  const presets = h("div", { class: "amb-presets" },
+    ...AMBIENCE_PRESETS.map((preset) => h("button", { class: "amb-preset", "data-preset": preset.id, onclick: () => {
+      writeMusicPrefs({ ambienceOn: true, ambience: { ...SILENT, ...preset.levels } });
+    } }, h("span", { "aria-hidden": "true", text: preset.emoji }), h("span", { text: preset.name }))),
+  );
+
+  const channels = h("div", { class: "amb-channels" });
+  for (const ch of AMBIENCE) {
+    const input = h("input", { type: "range", min: "0", max: "1", step: "0.01", class: "amb-slider", "aria-label": ch.name }) as HTMLInputElement;
+    const value = h("span", { class: "amb-value" });
+    input.addEventListener("input", () => {
+      const p = readMusicPrefs();
+      writeMusicPrefs({ ambienceOn: true, ambience: { ...p.ambience, [ch.id]: Number(input.value) } });
+    });
+    const row = h("label", { class: "amb-channel", style: `--a:${AMB_COLORS[ch.id]}` },
+      h("span", { class: "amb-emoji", "aria-hidden": "true", text: ch.emoji }),
+      h("span", { class: "amb-name", text: ch.name }),
+      input,
+      value,
+    );
+    sliders.set(ch.id, { input, row, value });
+    channels.append(row);
+  }
+
+  const box = h("section", { class: "radio-ambience" },
+    h("div", { class: "amb-head" },
+      h("div", {}, h("div", { class: "eyebrow", text: "AMBIENCE" }), h("h3", { text: "Mix your own soundscape" }),
+        h("p", { text: "Made on your PC like the music — play it alone or under any station." })),
+      power,
+    ),
+    presets,
+    channels,
+  );
+  ambienceBox = box;
+
+  paintAmbience = (p) => {
+    power.classList.toggle("on", p.ambienceOn);
+    power.setAttribute("aria-checked", String(p.ambienceOn));
+    box.classList.toggle("on", p.ambienceOn);
+    for (const [id, { input, row, value }] of sliders) {
+      const v = p.ambience[id] ?? 0;
+      // Never fight the slider you're dragging.
+      if (document.activeElement !== input) input.value = String(v);
+      input.style.setProperty("--fill", `${v * 100}%`);
+      value.textContent = v > 0 ? String(Math.round(v * 100)) : "—";
+      row.classList.toggle("live", p.ambienceOn && v > 0);
+      row.style.setProperty("--speed", `${2.6 - v * 1.6}s`);
+    }
+    for (const btn of presets.querySelectorAll<HTMLElement>(".amb-preset")) {
+      const preset = AMBIENCE_PRESETS.find((x) => x.id === btn.dataset.preset)!;
+      const match = p.ambienceOn && AMBIENCE.every(({ id }) => Math.abs((p.ambience[id] ?? 0) - (preset.levels[id] ?? 0)) < 0.005);
+      btn.classList.toggle("active", match);
+    }
+  };
+  paintAmbience(readMusicPrefs());
+  if (!ambienceWired) {
+    ambienceWired = true;
+    onMusicPrefs((p) => { if (ambienceBox?.isConnected) paintAmbience?.(p); });
+  }
+  return box;
 }
 
 let settingsBox: HTMLElement | null = null;
@@ -180,6 +270,10 @@ function buildSettings(): HTMLElement {
       row(ICONS.timer, "During focus sessions", "Starts with your pomodoro and stops for breaks.",
         stationSelect(p.focusStation, false, (v) => writeMusicPrefs({ focusStation: v as StationId })),
         toggle(p.focusMusic, "During focus sessions", (v) => writeMusicPrefs({ focusMusic: v }))),
+      row(ICONS.bolt, "Music follows your agent", "Faster as the tool calls pile up, a held suspended chord while a question waits for you, and a real ending when the work is done.",
+        toggle(p.adaptive, "Music follows your agent", (v) => writeMusicPrefs({ adaptive: v }))),
+      row(ICONS.music, "Mochi sings along", "Mochi mouths the melody — wide for low notes, round for high ones.",
+        toggle(p.singAlong, "Mochi sings along", (v) => writeMusicPrefs({ singAlong: v }))),
       row(ICONS.star, "Victory jingles", "A tiny fanfare when a session finishes — and a sad trombone when it fails.",
         toggle(p.jingles, "Victory jingles", (v) => writeMusicPrefs({ jingles: v }))),
     );
@@ -201,10 +295,7 @@ let drawSettings: ((p: MusicPrefs) => void) | null = null;
 export function nowPlayingCard(openRadio: () => void): HTMLElement {
   const name = h("b");
   const sub = h("small");
-  const stop = h("button", { class: "np-stop", title: "Stop the music", "aria-label": "Stop the music", onclick: (e: Event) => {
-    e.stopPropagation();
-    music.stop();
-  } }, svg("M7 7h10v10H7z", 11));
+  const stop = h("button", { class: "np-stop", title: "Stop the music", "aria-label": "Stop the music" }, svg("M7 7h10v10H7z", 11));
   const card = h("div", { class: "now-playing", role: "button", tabindex: "0", title: "Open Mochi Radio", onclick: openRadio, hidden: true },
     h("span", { class: "np-eq", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i")),
     h("span", { class: "np-copy" }, name, sub),
@@ -213,14 +304,36 @@ export function nowPlayingCard(openRadio: () => void): HTMLElement {
   card.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") openRadio();
   });
-  music.onState((s) => {
-    const st = stationById(s.station);
-    card.hidden = !s.playing;
-    card.style.setProperty("--c0", st.colors[0]);
-    card.style.setProperty("--c1", st.colors[1]);
-    card.style.setProperty("--beat", `${60 / st.bpm}s`);
-    name.textContent = `${st.emoji} ${st.name}`;
-    sub.textContent = s.reason === "work" ? "Agent at work" : s.reason === "focus" ? "Focus session" : "Mochi Radio";
-  });
+  const paint = () => {
+    const s = music.state;
+    const p = readMusicPrefs();
+    const ambience = p.ambienceOn && AMBIENCE.some(({ id }) => (p.ambience[id] ?? 0) > 0);
+    card.hidden = !s.playing && !ambience;
+    if (s.playing) {
+      const st = stationById(s.station);
+      card.style.setProperty("--c0", st.colors[0]);
+      card.style.setProperty("--c1", st.colors[1]);
+      card.style.setProperty("--beat", `${60 / s.bpm}s`);
+      name.textContent = `${st.emoji} ${st.name}`;
+      sub.textContent = s.reason === "work" ? "Agent at work" : s.reason === "focus" ? "Focus session" : "Mochi Radio";
+    } else if (ambience) {
+      // Ambience alone: show what's in the mix.
+      const loudest = AMBIENCE.filter(({ id }) => (p.ambience[id] ?? 0) > 0).sort((a, b) => (p.ambience[b.id] ?? 0) - (p.ambience[a.id] ?? 0));
+      card.style.setProperty("--c0", AMB_COLORS[loudest[0].id]);
+      card.style.setProperty("--c1", "#a594ff");
+      card.style.setProperty("--beat", "1.6s");
+      name.textContent = loudest.slice(0, 3).map((c) => c.emoji).join(" ");
+      sub.textContent = "Ambience";
+    }
+    stop.title = s.playing ? "Stop the music" : "Stop the ambience";
+    stop.setAttribute("aria-label", stop.title);
+  };
+  stop.onclick = (e: Event) => {
+    e.stopPropagation();
+    if (music.state.playing) music.stop();
+    else writeMusicPrefs({ ambienceOn: false });
+  };
+  music.onState(paint);
+  onMusicPrefs(paint);
   return card;
 }

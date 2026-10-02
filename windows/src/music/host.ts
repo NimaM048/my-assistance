@@ -9,9 +9,10 @@
 // while it waits for you, a jingle when it finishes or fails.
 
 import { broadcast, onEvent } from "../core/bridge";
+import { SILENT } from "./ambience";
 import type { BotStateName } from "../core/layout";
 import { MusicEngine, type JingleKind, type MusicReason, type MusicState } from "./engine";
-import { onMusicPrefs, readMusicPrefs, type MusicPrefs } from "./prefs";
+import { onMusicPrefs, readMusicPrefs, writeMusicPrefs, type MusicPrefs } from "./prefs";
 import { WORK_PICKS, type StationId } from "./stations";
 
 export type MusicCommand =
@@ -21,6 +22,14 @@ export type MusicCommand =
   | { action: "stop"; reason?: MusicReason }
   | { action: "jingle"; kind: JingleKind }
   | { action: "hello" };
+
+/** A melody note, for windows where Mochi sings along. */
+export interface MusicNote {
+  midi: number;
+  dur: number;
+  low: number;
+  high: number;
+}
 
 export interface MusicBeat {
   beat: number;
@@ -40,21 +49,34 @@ export class MusicHost {
   /** You turned work music off mid-session: stay quiet until the session ends. */
   private workMuted = false;
   private lastWorkStation: StationId | null = null;
+  /** When recent tool calls happened (audio energy follows their rate). */
+  private toolTimes: number[] = [];
+  private energyTimer: number | null = null;
 
   constructor() {
     this.engine.setVolume(this.prefs.volume);
+    this.engine.wantNotes = this.prefs.singAlong;
+    // The ambience never starts by itself when Coucou launches.
+    if (this.prefs.ambienceOn) this.prefs = writeMusicPrefs({ ambienceOn: false });
     onMusicPrefs((p) => {
       const wasOn = this.prefs.workMusic;
       this.prefs = p;
       this.engine.setVolume(p.volume);
+      this.engine.wantNotes = p.singAlong;
+      this.engine.setAmbience(p.ambienceOn ? p.ambience : SILENT);
       if (wasOn && !p.workMusic && this.engine.reason === "work") this.engine.stop();
       if (!wasOn && p.workMusic && ACTIVE.has(this.agentState)) this.startWork();
+      if (!p.adaptive) {
+        this.engine.setEnergy(0.5);
+        this.engine.setTension(false);
+      }
     });
     this.engine.subscribe((e) => {
       if (e.type === "state") broadcast("music-state", e.state);
       if (e.type === "beat") {
         broadcast("music-beat", { ...e, bpm: this.engine.state.bpm } satisfies MusicBeat);
       }
+      if (e.type === "note") broadcast("music-note", { midi: e.midi, dur: e.dur, low: e.low, high: e.high } satisfies MusicNote);
     });
     void onEvent<MusicCommand>("music-command", (cmd) => this.command(cmd));
     // Windows that open later ask what's playing.
@@ -96,20 +118,36 @@ export class MusicHost {
     if (ACTIVE.has(state)) {
       this.cancelIdle();
       this.engine.duck(false);
+      this.engine.setTension(false);
       if (!this.engine.playing) this.startWork();
+      this.watchEnergy();
       return;
     }
     if (WAITING.has(state)) {
-      // Keep the groove, but turn it down so the question gets heard.
-      if (this.engine.playing) this.engine.duck(true);
+      // Keep the groove, but turn it down so the question gets heard — and,
+      // if the music follows your agent, let it hang on a suspended chord.
+      if (this.engine.playing) {
+        const adaptive = this.prefs.adaptive && this.engine.reason === "work";
+        this.engine.setTension(adaptive);
+        this.engine.duck(true, adaptive ? 0.42 : 0.18);
+      }
       return;
     }
     this.engine.duck(false);
+    this.engine.setTension(false);
     if (state === "finished" || state === "error") {
+      // Keep the tempo it had: the ending should land at full speed.
+      this.stopEnergy(false);
       const ours = this.engine.reason === "work";
-      if (ours) this.engine.stop(0.6);
-      if ((ours || this.prefs.workMusic) && this.prefs.jingles && ACTIVE.has(prev)) {
-        window.setTimeout(() => this.engine.jingle(state === "finished" ? "finish" : "error"), ours ? 350 : 0);
+      const wasActive = ACTIVE.has(prev) || WAITING.has(prev);
+      if (ours && state === "finished" && this.prefs.adaptive) {
+        // A proper ending: a cadence home, and the last chord is the celebration.
+        if (!this.engine.finale()) this.engine.stop(0.6);
+      } else {
+        if (ours) this.engine.stop(0.6);
+        if ((ours || this.prefs.workMusic) && this.prefs.jingles && wasActive) {
+          window.setTimeout(() => this.engine.jingle(state === "finished" ? "finish" : "error"), ours ? 350 : 0);
+        }
       }
       this.workMuted = false;
       return;
@@ -119,9 +157,44 @@ export class MusicHost {
     this.cancelIdle();
     this.idleTimer = window.setTimeout(() => {
       this.idleTimer = null;
+      this.stopEnergy();
       if (this.engine.reason === "work") this.engine.stop(1.4);
       this.workMuted = false;
     }, 4000);
+  }
+
+  /** Called on every tool call: the more of them, the livelier the music. */
+  tool() {
+    const now = Date.now();
+    this.toolTimes.push(now);
+    while (this.toolTimes.length && now - this.toolTimes[0] > 20_000) this.toolTimes.shift();
+    this.updateEnergy();
+  }
+
+  private updateEnergy() {
+    if (!this.prefs.adaptive) return;
+    const now = Date.now();
+    while (this.toolTimes.length && now - this.toolTimes[0] > 20_000) this.toolTimes.shift();
+    // No tool calls (thinking) → mellow 0.3; about one every few seconds → ~0.75; a storm → ~0.95.
+    const rate = this.toolTimes.length;
+    this.engine.setEnergy(0.3 + 0.68 * (1 - Math.exp(-rate / 6)));
+  }
+
+  /** While work music plays, let the energy settle back as tool calls stop. */
+  private watchEnergy() {
+    if (this.energyTimer != null) return;
+    this.energyTimer = window.setInterval(() => {
+      if (!this.engine.playing || this.engine.reason !== "work") return;
+      this.updateEnergy();
+    }, 2500);
+    this.updateEnergy();
+  }
+
+  private stopEnergy(reset = true) {
+    if (this.energyTimer != null) window.clearInterval(this.energyTimer);
+    this.energyTimer = null;
+    this.toolTimes = [];
+    if (reset) this.engine.setEnergy(0.5);
   }
 
   private startWork() {

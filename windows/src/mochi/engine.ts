@@ -19,7 +19,7 @@ export type EyeShape =
   | "sparkle" | "squeeze";
 
 /** Tiny mouth drawn on the sphere under the eyes. Mochi has none at rest. */
-export type MouthShape = "none" | "smile" | "grin" | "o" | "cat" | "flat" | "wobble" | "hmm";
+export type MouthShape = "none" | "smile" | "grin" | "o" | "cat" | "flat" | "wobble" | "hmm" | "sing";
 
 export type BadgeKind = "dots" | "bang" | "question" | "dot";
 
@@ -272,6 +272,12 @@ export class BotEngine {
   // Mouth: the shape asked for, until when, and how visible it is (0…1).
   mouthShape: MouthShape = "none";
   mouthUntil = 0;
+  // Singing along: when the current note started, how long it lasts, how high it is (0…1), how open the mouth is.
+  private singStart = 0;
+  private singDur = 0;
+  private singUntil = 0;
+  private singPitch = 0.5;
+  private singOpen = 0;
   private mouthS = 0;
   private mouthDrawn: MouthShape = "none";
 
@@ -676,6 +682,25 @@ export class BotEngine {
     this.anim("hands", [[1, 200, Ease.back], [1, Math.max(0, seconds * 1000 - 420), Ease.lin], [0, 220, Ease.inOut]]);
   }
 
+  /**
+   * Mouth one melody note: the mouth pops open on the note, holds a little,
+   * and its shape follows the pitch (a wide "ah" low, a round "oo" high).
+   */
+  sing(midi: number, dur: number, low: number, high: number) {
+    if (this.isMini) return;
+    const t = now();
+    this.singStart = t;
+    this.singDur = Math.max(0.08, dur);
+    this.singUntil = t + this.singDur + 0.12;
+    this.singPitch = Math.max(0, Math.min(1, (midi - low) / Math.max(1, high - low)));
+    // A long note now and then gets a little ♪.
+    if (dur > 0.45 && Math.random() < 0.3) this.emit("note", 1);
+  }
+
+  get singing(): boolean {
+    return now() < this.singUntil;
+  }
+
   /** A mouth for a while; it fades in and out on its own. */
   say(shape: MouthShape, seconds: number) {
     this.mouthShape = shape;
@@ -772,6 +797,7 @@ export class BotEngine {
       Math.abs(this.tgEs - this.es) > 0.002 ||
       this.slotH > 0.001 || Math.abs(this.slotHVel) > 0.001 ||
       Math.abs((this.wantedMouth() === "none" ? 0 : 1) - this.mouthS) > 0.01 ||
+      this.singOpen > 0.01 ||
       this.groove > 0.01 || this.grooveTarget > 0 ||
       Math.abs(this.col[0] - this.colT[0]) > 0.003 ||
       Math.abs(this.col[1] - this.colT[1]) > 0.003 ||
@@ -913,6 +939,15 @@ export class BotEngine {
       this.gTilt = 0;
     }
 
+    // Singing: open fast on the note, settle to a held vowel, close between notes.
+    {
+      const age = n - this.singStart;
+      const target = n < this.singUntil
+        ? (age < 0.04 ? 1 : Math.max(0.4, 1 - ((age - 0.04) / this.singDur) * 0.6)) * (n > this.singUntil - 0.12 ? 0.2 : 1)
+        : 0;
+      this.singOpen += (target - this.singOpen) * (1 - Math.pow(target > this.singOpen ? 1e-7 : 1e-4, dt));
+    }
+
     // The little mouth eases in and out rather than popping.
     const wanted = this.wantedMouth();
     if (wanted !== "none") {
@@ -940,6 +975,7 @@ export class BotEngine {
   private wantedMouth(): MouthShape {
     if (this.isMini || this.morph > 0.2) return "none";
     if (now() < this.mouthUntil) return this.mouthShape;
+    if (now() < this.singUntil + 0.25) return "sing";
     return STATE_MOUTH[this.state] ?? "none";
   }
 
@@ -1433,6 +1469,24 @@ export class BotEngine {
         x.arc(R * 0.055, -R * 0.02, R * 0.055, Math.PI * 0.05, Math.PI * 0.9);
         x.stroke();
         break;
+      case "sing": {
+        const open = this.singOpen;
+        const w = R * (0.1 - 0.035 * this.singPitch) * (0.85 + 0.15 * open);
+        const hgt = R * (0.03 + 0.1 * open) * (0.8 + 0.4 * this.singPitch);
+        x.beginPath();
+        x.ellipse(0, R * 0.02, w, Math.max(R * 0.018, hgt), 0, 0, Math.PI * 2);
+        x.fill();
+        if (open > 0.45) {
+          x.save();
+          x.clip();
+          x.fillStyle = "#FF7A93";
+          x.beginPath();
+          x.ellipse(0, R * 0.02 + hgt * 0.75, w * 0.7, hgt * 0.45, 0, 0, Math.PI * 2);
+          x.fill();
+          x.restore();
+        }
+        break;
+      }
       case "flat":
         x.beginPath();
         x.moveTo(-R * 0.08, 0);

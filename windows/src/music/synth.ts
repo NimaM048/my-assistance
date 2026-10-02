@@ -271,3 +271,133 @@ export function wah(r: Rig, t: number, midi: number, dur: number, vel = 1) {
   const g = envGain(r, t, 0.12 * vel, 0.03, dur);
   o.connect(lp).connect(g).connect(r.out);
 }
+
+// ── Persian ensemble (the "Tehran Nights" station) ────────────────────────────
+//
+// Pitches may be fractional MIDI numbers: 0.5 is a quarter tone, so the koron
+// notes of the dastgahs come out exactly.
+
+/** Santur: a hammered dulcimer — two strings per course, bright partials, a mezrab click. */
+export function santur(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const ring = Math.min(2.4, 0.6 + dur * 1.6);
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(Math.min(12000, f * 9), t);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(600, f * 2.5), t + ring);
+  const g = envGain(r, t, 0.1 * vel, 0.0015, ring);
+  // The two strings of a course are never quite in tune — that's the shimmer.
+  for (const cents of [-6, 5]) {
+    const o = osc(r, "triangle", f, t, t + ring + 0.1);
+    o.detune.value = cents;
+    o.connect(lp);
+  }
+  lp.connect(g).connect(r.out);
+  const p = envGain(r, t, 0.045 * vel, 0.001, 0.16);
+  osc(r, "sine", f * 3.01, t, t + 0.3).connect(p).connect(r.out);
+  const p2 = envGain(r, t, 0.022 * vel, 0.001, 0.07);
+  osc(r, "sine", f * 5.02, t, t + 0.15).connect(p2).connect(r.out);
+  const n = noiseSrc(r, t, 0.02);
+  const bp = r.ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = Math.min(9000, f * 4);
+  bp.Q.value = 1.4;
+  const ng = envGain(r, t, 0.05 * vel, 0.0005, 0.014);
+  n.connect(bp).connect(ng).connect(r.out);
+}
+
+/** Tar: a plucked lute — nasal, woody, with a tiny scoop up into the note. */
+export function tar(r: Rig, t: number, midi: number, dur: number, vel = 1) {
+  const f = mtof(midi);
+  const len = Math.min(0.9, dur + 0.25);
+  const o = osc(r, "sawtooth", f * 0.985, t, t + len + 0.05);
+  o.frequency.exponentialRampToValueAtTime(f, t + 0.035);
+  const body = r.ctx.createBiquadFilter();
+  body.type = "bandpass";
+  body.frequency.value = 1100;
+  body.Q.value = 1.1;
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(5200, t);
+  lp.frequency.exponentialRampToValueAtTime(700, t + len);
+  const g = envGain(r, t, 0.2 * vel, 0.002, len);
+  o.connect(lp).connect(body).connect(g).connect(r.out);
+  const sub = osc(r, "triangle", f, t, t + len + 0.05);
+  const sg = envGain(r, t, 0.06 * vel, 0.003, len * 0.8);
+  sub.connect(sg).connect(r.out);
+}
+
+/** Daf: the big frame drum — a deep "dum", a bright "tak", and the rings inside it. */
+export function daf(r: Rig, t: number, stroke: "dum" | "tak", vel = 1) {
+  if (stroke === "dum") {
+    const o = osc(r, "sine", 105, t, t + 0.45);
+    o.frequency.exponentialRampToValueAtTime(58, t + 0.2);
+    const g = envGain(r, t, 0.75 * vel, 0.003, 0.38);
+    o.connect(g).connect(r.out);
+    const n = noiseSrc(r, t, 0.12);
+    const lp = r.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 420;
+    const ng = envGain(r, t, 0.3 * vel, 0.002, 0.1);
+    n.connect(lp).connect(ng).connect(r.out);
+  } else {
+    const n = noiseSrc(r, t, 0.1);
+    const bp = r.ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 2300;
+    bp.Q.value = 0.9;
+    const g = envGain(r, t, 0.34 * vel, 0.001, 0.07);
+    n.connect(bp).connect(g).connect(r.out);
+  }
+  // The chain of rings on the inside of the frame keeps shimmering a moment.
+  for (const [offset, k] of [[0, 1], [0.018, 0.6]] as const) {
+    const z = noiseSrc(r, t + offset, 0.3);
+    const hp = r.ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 6500;
+    const zg = envGain(r, t + offset, (stroke === "dum" ? 0.05 : 0.08) * k * vel, 0.004, 0.22);
+    z.connect(hp).connect(zg).connect(r.out);
+  }
+}
+
+/** Tombak: the goblet drum — a round "tom" from the centre, a dry "bak" from the rim. */
+export function tombak(r: Rig, t: number, stroke: "tom" | "bak", vel = 1) {
+  if (stroke === "tom") {
+    const o = osc(r, "sine", 175, t, t + 0.3);
+    o.frequency.exponentialRampToValueAtTime(112, t + 0.07);
+    const g = envGain(r, t, 0.55 * vel, 0.002, 0.24);
+    o.connect(g).connect(r.out);
+  } else {
+    const o = osc(r, "triangle", 640, t, t + 0.08);
+    o.frequency.exponentialRampToValueAtTime(520, t + 0.04);
+    const g = envGain(r, t, 0.16 * vel, 0.001, 0.05);
+    o.connect(g).connect(r.out);
+  }
+  const n = noiseSrc(r, t, 0.04);
+  const hp = r.ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = stroke === "tom" ? 1800 : 3200;
+  const ng = envGain(r, t, (stroke === "tom" ? 0.06 : 0.14) * vel, 0.0005, 0.03);
+  n.connect(hp).connect(ng).connect(r.out);
+}
+
+/** A soft drone on the tonic and fifth, under the whole tune. */
+export function drone(r: Rig, t: number, midis: number[], dur: number, vel = 1) {
+  const lp = r.ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 1100;
+  const g = r.ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(0.05 * vel, t + dur * 0.3);
+  g.gain.setValueAtTime(0.05 * vel, t + dur * 0.75);
+  g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  for (const m of midis) {
+    osc(r, "sine", mtof(m), t, t + dur + 0.05).connect(lp);
+    const o = osc(r, "triangle", mtof(m) * 2, t, t + dur + 0.05);
+    o.detune.value = 4;
+    const og = r.ctx.createGain();
+    og.gain.value = 0.25;
+    o.connect(og).connect(lp);
+  }
+  lp.connect(g).connect(r.out);
+}

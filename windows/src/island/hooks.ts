@@ -211,6 +211,7 @@ function handleHook(island: Island, payload: HookPayload) {
       State.updateTask(CLAUDE_ID, "working");
       const tool = payload.tool_name ?? "Tool";
       State.appendStep(CLAUDE_ID, stepLabel(tool, payload.tool_input ?? {}));
+      island.toolActivity();
       surface("overview", false);
       break;
     }

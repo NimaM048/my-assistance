@@ -7,16 +7,17 @@
 
 import { IS_TAURI, broadcast, onEvent } from "../core/bridge";
 import type { JingleKind, MusicReason, MusicState } from "./engine";
-import { startMusicHost, type MusicBeat, type MusicCommand } from "./host";
+import { startMusicHost, type MusicBeat, type MusicCommand, type MusicNote } from "./host";
 import type { StationId } from "./stations";
 
 type StateFn = (s: MusicState) => void;
 type BeatFn = (b: MusicBeat) => void;
 
 class MusicRemote {
-  state: MusicState = { playing: false, station: "lofi", reason: null, bpm: 76, ducked: false, beatEpoch: 0 };
+  state: MusicState = { playing: false, station: "lofi", reason: null, bpm: 76, ducked: false, beatEpoch: 0, mode: null, tension: false };
   private stateFns = new Set<StateFn>();
   private beatFns = new Set<BeatFn>();
+  private noteFns = new Set<(n: MusicNote) => void>();
   private wired = false;
 
   private wire() {
@@ -29,6 +30,9 @@ class MusicRemote {
     });
     void onEvent<MusicBeat>("music-beat", (b) => {
       for (const fn of this.beatFns) fn(b);
+    });
+    void onEvent<MusicNote>("music-note", (n) => {
+      for (const fn of this.noteFns) fn(n);
     });
     this.send({ action: "hello" });
   }
@@ -64,6 +68,13 @@ class MusicRemote {
     this.wire();
     this.beatFns.add(fn);
     return () => this.beatFns.delete(fn);
+  }
+
+  /** Melody notes as they play (only while "Mochi sings along" is on). */
+  onNote(fn: (n: MusicNote) => void): () => void {
+    this.wire();
+    this.noteFns.add(fn);
+    return () => this.noteFns.delete(fn);
   }
 
   /** Beats since the music started, estimated from the shared beat epoch. */

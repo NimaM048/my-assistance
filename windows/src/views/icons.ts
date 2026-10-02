@@ -21,6 +21,8 @@ export const ICONS = {
   grid: "M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z",
   // tshirt (Mochi's wardrobe)
   shirt: "M8.2 3.2 3 6.1l2.1 4.2 2.1-1V20.8h9.6V9.3l2.1 1 2.1-4.2-5.2-2.9c-.5 1.6-2 2.7-3.8 2.7S8.7 4.8 8.2 3.2z",
+  // bolt (music follows your agent)
+  bolt: "M13.2 2 4.5 13.4h6.2L9.8 22l8.7-11.6h-6.2L13.2 2z",
   // person (About you)
   user: "M12 11.6a4.3 4.3 0 1 0 0-8.6 4.3 4.3 0 0 0 0 8.6zm0 2c-4.6 0-8.3 2.4-8.3 5.4V21h16.6v-2c0-3-3.7-5.4-8.3-5.4z",
   // gearshape

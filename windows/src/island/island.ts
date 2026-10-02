@@ -421,11 +421,20 @@ export class Island {
         State.notify();
       } else if (e.type === "beat") {
         this.onBeat(e.bar, e.downbeat);
+      } else if (e.type === "note") {
+        // Mochi sings along — on screen, not while it needs you, not mid-emote.
+        if (State.mode === "hidden" || State.music.ducked || this.engine.emoting) return;
+        this.engine.sing(e.midi, e.dur, e.low, e.high);
       } else if (e.type === "jingle") {
         this.engine.triggerEmote(e.kind === "error" ? "pout" : "celebrate");
         this.ensureRunning();
       }
     });
+  }
+
+  /** A tool call happened: work music gets a little livelier. */
+  toolActivity() {
+    this.music?.tool();
   }
 
   private onBeat(bar: number, downbeat: boolean) {

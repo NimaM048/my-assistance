@@ -94,6 +94,10 @@ export function createPortrait(opts: PortraitOptions): Portrait {
     }
     if (opts.dance) {
       detach.push(music.onState(applyMusic));
+      // …and sings along to the melody.
+      detach.push(music.onNote((n) => {
+        if (!document.hidden && !music.state.ducked && !engine.emoting) engine.sing(n.midi, n.dur, n.low, n.high);
+      }));
       applyMusic();
     }
     if (opts.follow) {

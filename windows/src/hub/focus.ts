@@ -40,6 +40,8 @@ export interface FocusHost {
   confetti(from: HTMLElement): void;
   /** A floating "+10 XP" over an element. */
   xpPop(from: HTMLElement, amount: number): void;
+  /** Opens the break arcade (only does something during a break). */
+  openArcade(): void;
   notify(title: string, detail: string): void;
   activity(title: string, repo: string): void;
 }
@@ -830,8 +832,16 @@ function drawTimer() {
   ui.startBtn.textContent = d.running ? "Pause" : paused ? "Resume" : d.mode === "focus" ? "Start focus" : "Start break";
   ui.startBtn.classList.toggle("pause", d.running);
 
-  // Lengths only make sense for focus.
+  // Lengths only make sense for focus; a break offers a little game instead.
   clear(ui.lengths);
+  ui.lengths.classList.toggle("fx-break-row", d.mode !== "focus");
+  if (d.mode !== "focus") {
+    ui.lengths.append(h("button", { class: "fx-arcade-btn", onclick: () => {
+      const data = host.data();
+      if (!data.running) toggleTimer();
+      host.openArcade();
+    } }, h("span", { class: "fx-arcade-emoji", "aria-hidden": "true", text: "🎮" }), h("span", { text: d.running ? "Play with Mochi" : "Start the break and play" })));
+  }
   if (d.mode === "focus") {
     for (const m of LENGTHS) {
       ui.lengths.append(h("button", { class: d.focusMinutes === m ? "active" : "", disabled: d.running, onclick: () => {
@@ -993,7 +1003,7 @@ export function focusKeydown(e: KeyboardEvent): boolean {
   if (!root?.isConnected || e.ctrlKey || e.metaKey || e.altKey) return false;
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return false;
-  if (document.querySelector(".quick-capture-overlay,.command-overlay,.notification-overlay,.project-search-overlay")) return false;
+  if (document.querySelector(".quick-capture-overlay,.command-overlay,.notification-overlay,.project-search-overlay,.arcade-overlay,.occ-overlay,.levelup-overlay")) return false;
   if (e.key === " ") {
     toggleTimer();
     return true;

@@ -3,6 +3,7 @@ import "./focus.css";
 import "./radio.css";
 import "./wardrobe.css";
 import "./occasion.css";
+import "./games.css";
 import { Bridge, IS_TAURI, onEvent, type GitHubCatalog, type GitHubRepository, type GitHubWorkQueue, type ProjectStatus, type ProjectSearchHit, type SearchProject } from "../core/bridge";
 import { h, clear, svg } from "../views/dom";
 import { ICONS } from "../views/icons";
@@ -15,6 +16,7 @@ import { growthStore, randomOutfit } from "../mochi/growth";
 import { occasionFor, occasionOverride, persianDate } from "../mochi/occasions";
 import { profileStore } from "../core/profile";
 import { openOccasion } from "./occasion";
+import { openArcade, type ArcadeHost } from "./games";
 import { music } from "../music/remote";
 import { STATIONS } from "../music/stations";
 
@@ -136,6 +138,14 @@ const FA_COPY: Record<string, string> = {
   "Jump over the fire: give it your paleness, take its warmth.": "از روی آتش بپر: زردی‌ات را بده، سرخی‌اش را بگیر.", "Jump! 🔥": "بپر! 🔥",
   "Make a wish, then open a Hafez fortune": "نیت کن و فال حافظ بگیر", "The longest night of the year — pomegranates, watermelon and a little Hafez.": "بلندترین شب سال — انار، هندوانه و کمی حافظ.",
   "Make a wish and blow out the candles 🕯️": "آرزو کن و شمع‌ها را فوت کن 🕯️", "Blow out the candles": "شمع‌ها را فوت کن",
+  // Break arcade (src/hub/games.ts)
+  "Play with Mochi": "با موچی بازی کن", "Play a break game": "بازی در زمان استراحت", "Start the break and play": "استراحت را شروع کن و بازی کن", "Break arcade": "بازی‌های استراحت", "WHILE YOU REST": "تا وقتی استراحت می‌کنی", "Time left in your break": "زمان باقی‌ماندهٔ استراحت",
+  "Catch the stars": "ستاره‌ها را بگیر", "Mochi beat": "ریتم موچی", "Move Mochi to catch falling stars. Golden stars are worth more — dodge the storm clouds!": "موچی را جابه‌جا کن تا ستاره‌ها را بگیرد. ستاره‌های طلایی امتیاز بیشتری دارند — از ابرهای طوفانی دوری کن!",
+  "Notes slide toward Mochi. Tap right on the beat for a Perfect.": "نت‌ها به سمت موچی می‌آیند. درست روی ضرب بزن تا «عالی» بگیری.", "Mouse or ← →": "ماوس یا ← →", "Space, click or any key": "Space، کلیک یا هر کلیدی",
+  "Score": "امتیاز", "Best": "بهترین", "combo": "پشت‌سرهم", "points": "امتیاز", "New best! ✨": "رکورد جدید! ✨", "BREAK'S OVER": "استراحت تمام شد", "ROUND OVER": "دور تمام شد", "Play again": "دوباره بازی کن", "Back to work 💪": "برگرد سر کار 💪", "Finish": "پایان",
+  "Break's over": "استراحت تمام شد", "Mochi had fun. Ready to focus again?": "به موچی خوش گذشت. آماده‌ای دوباره تمرکز کنی؟",
+  "Stars caught": "ستاره‌های گرفته‌شده", "Stars missed": "ستاره‌های از دست رفته", "Storms hit": "برخورد با طوفان", "Best combo": "بهترین پشت‌سرهم", "Perfect": "عالی", "Good": "خوب", "Accuracy": "دقت", "Combo": "پشت‌سرهم",
+  "Miss": "از دست رفت", "Perfect!": "عالی!", "Warming up the music…": "موسیقی دارد گرم می‌شود…", "Ready…": "آماده…", "Go!": "برو!",
   "Mochi's wardrobe": "کمد لباس موچی", "Mochi grows as you work. Level up and dress it your way.": "موچی همراه کار تو بزرگ می‌شود. لِوِل بگیر و هر جور دوست داری لباسش را عوض کن.", "Surprise outfit": "لباس غافلگیرانه", "Take it all off": "همه را دربیاور", "Level": "لِوِل", "XP": "امتیاز", "total": "مجموع", "Next unlock": "باز شدن بعدی", "level": "لِوِل", "Everything unlocked — Mochi is a legend ✨": "همه‌چیز باز شده — موچی یک افسانه است ✨", "Everything": "همه", "Hats": "کلاه‌ها", "Glasses": "عینک‌ها", "Scarves & ties": "شال و پاپیون", "Headphones": "هدفون‌ها", "WARDROBE": "کمد لباس", "Dress Mochi up": "موچی را آماده کن", "Take it off": "درش بیاور", "Wear it": "بپوشانش", "Wear": "پوشیدن", "Wearing": "پوشیده", "Unlocks at a higher level": "در لِوِل بالاتر باز می‌شود", "HOW MOCHI GROWS": "موچی چطور بزرگ می‌شود", "Finish a task": "تمام کردن یک تسک", "High-priority task": "تسک با اولویت بالا", "Focus session (per minute)": "جلسهٔ تمرکز (هر دقیقه)", "Clear today's list": "تمام کردن همهٔ تسک‌های امروز", "Streak of 3, 7, 14, 30 days": "۳، ۷، ۱۴ و ۳۰ روز پیاپی", "Agent session finished": "تمام شدن یک سشن ایجنت", "RECENT XP": "امتیازهای اخیر", "Finish a task or a focus session and Mochi's first XP shows up here.": "یک تسک یا جلسهٔ تمرکز را تمام کن تا اولین امتیاز موچی اینجا بیاید.", "Task finished": "تسک تمام شد", "Cleared today's list": "همهٔ تسک‌های امروز تمام شد", "Streak milestone": "رکورد روزهای پیاپی", "Agent session done": "سشن ایجنت تمام شد", "Break game": "بازی زمان استراحت", "Took a care break": "یک استراحت مراقبتی", "LEVEL UP": "لِوِل جدید", "Mochi reached level": "موچی رسید به لِوِل", "New things in the wardrobe:": "چیزهای تازه در کمد لباس:", "Keep going — new outfits are on the way.": "ادامه بده — لباس‌های تازه در راه‌اند.", "Later": "بعداً", "Open the wardrobe": "باز کردن کمد لباس", "Level up": "لِوِل جدید", "Little sprout": "جوانهٔ کوچولو", "Party hat": "کلاه جشن", "Round glasses": "عینک گرد", "Cozy beanie": "کلاه بافتنی", "Red scarf": "شال‌گردن قرمز", "Pink bow": "پاپیون صورتی", "Bow tie": "پاپیون", "Flower crown": "تاج گل", "Midnight headphones": "هدفون نیمه‌شب", "Sunglasses": "عینک آفتابی", "Cat ears": "گوش گربه", "Mint headphones": "هدفون نعنایی", "Heart cheeks": "گونه‌های قلبی", "Bandana": "دستمال‌گردن", "Star shades": "عینک ستاره‌ای", "Gold headphones": "هدفون طلایی", "Royal crown": "تاج پادشاهی", "Pearl necklace": "گردنبند مروارید", "Monocle": "عینک تک‌چشمی", "Wizard hat": "کلاه جادوگر", "Rainbow headphones": "هدفون رنگین‌کمانی",
 };
 Object.assign(FA_COPY, {
@@ -1112,10 +1122,22 @@ const focusHost: FocusHost = {
   toast,
   confetti: popConfetti,
   xpPop: (el, amount) => xpPop(el, amount, formatNumber),
+  openArcade: () => openArcade(arcadeHost),
   notify: addFocusNotification,
   activity: (title, repo) => recordActivity("task", title, repo, "Task completed"),
 };
 setFocusHost(focusHost);
+
+/** The break arcade lives exactly as long as a running break. */
+const arcadeHost: ArcadeHost = {
+  breakEndsAt: () => (focus.running && focus.mode !== "focus" && focus.endAt && focus.endAt > Date.now() ? focus.endAt : null),
+  breakKey: () => String(focus.endAt ?? Date.now()),
+  num: formatNumber,
+  clock: fmtClock,
+  t: (text) => translateText(text),
+  confetti: popConfetti,
+  xpPop: (el, amount) => xpPop(el, amount, formatNumber),
+};
 
 const wardrobeHost: WardrobeHost = {
   num: formatNumber,
